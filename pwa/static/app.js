@@ -246,25 +246,36 @@ inputEl.addEventListener('input', () => {
   }
 });
 
+// ── Logo toggle paleta de comandos ────────────────────────────────────────────
+
+const logoEl     = document.querySelector('.logo');
+const cmdPalette = document.getElementById('cmd-palette');
+
+if (logoEl && cmdPalette) {
+  logoEl.addEventListener('click', () => cmdPalette.classList.toggle('hidden'));
+}
+
 // ── Chips de comandos ─────────────────────────────────────────────────────────
 
 document.querySelectorAll('.chip').forEach(chip => {
   chip.addEventListener('click', () => {
     const cmd = chip.textContent.replace(/^\S+\s/, '').trim(); // quitar emoji
     const templates = {
-      'ask':     'ask ',
-      'build':   'build "',
-      'fix':     'fix',
-      'update':  'update "',
-      'show':    'show',
-      'history': 'history',
-      'balance': 'balance',
+      'ask':       'ask ',
+      'build':     'build "',
+      'fix':       'fix',
+      'update':    'update "',
+      'show':      'show',
+      'history':   'history',
+      'balance':   'balance',
+      'workspace': 'workspace ',
     };
     inputEl.value = templates[cmd] || cmd + ' ';
     inputEl.focus();
     inputEl.dispatchEvent(new Event('input'));
-    // mover cursor al final
     inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+    // cerrar paleta si estaba abierta
+    if (cmdPalette) cmdPalette.classList.add('hidden');
   });
 });
 
@@ -328,19 +339,30 @@ function renderProjects(projects) {
         <button class="proj-delete-btn">🗑</button>
       </div>
     `;
-    card.querySelector('.proj-select-btn').addEventListener('click', () => selectProject(p.path, p.name));
+    card.querySelector('.proj-select-btn').addEventListener('click', () => selectProject(p));
     card.querySelector('.proj-delete-btn').addEventListener('click', (e) => deleteProject(p.path, p.name, e.currentTarget, card));
     projectsList.appendChild(card);
   }
 }
 
-async function selectProject(path, name) {
-  workspace = path;
-  localStorage.setItem('deep_workspace', path);
+function selectProject(p) {
+  workspace = p.path;
+  localStorage.setItem('deep_workspace', p.path);
   updateWorkspaceLabel();
   closeProjectsPanel();
-  const loading = addMessage('assistant', '...', true);
-  await runCommand('show', '', loading);
+
+  const date = fmtDate(p.updated_at || p.timestamp);
+  const createdDate = fmtDate(p.timestamp);
+  let msg = `**📂 ${p.name}**\n\n`;
+  msg += `**Tarea:** ${p.task}\n\n`;
+  if (p.last_update) msg += `**Último update:** ${p.last_update}\n\n`;
+  msg += `**Archivos:** ${p.file_count}`;
+  if (createdDate) msg += `  ·  **Creado:** ${createdDate}`;
+  if (p.updated_at) msg += `  ·  **Actualizado:** ${fmtDate(p.updated_at)}`;
+  msg += `\n\n---\nWorkspace listo. Podés usar \`fix\`, \`update\`, \`show\` o chatear para continuar.`;
+
+  addMessage('assistant', msg);
+  inputEl.focus();
 }
 
 async function deleteProject(path, name, btn, card) {
