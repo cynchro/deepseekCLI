@@ -32,10 +32,25 @@
         <span id="workspace-label" class="workspace-label" title="Workspace actual"></span>
       </div>
       <div class="header-actions">
+        <button id="projects-btn" title="Mis proyectos">&#9776;</button>
         <button id="balance-btn" title="Ver crédito">$</button>
         <button id="new-chat-btn" title="Nueva conversación">+</button>
       </div>
     </header>
+
+    <!-- Panel overlay -->
+    <div id="panel-overlay" class="panel-overlay hidden"></div>
+
+    <!-- Panel de proyectos -->
+    <div id="projects-panel" class="projects-panel hidden">
+      <div class="panel-header">
+        <span class="panel-title">Proyectos</span>
+        <button id="close-panel-btn" class="close-panel-btn">&#10005;</button>
+      </div>
+      <div id="projects-list" class="projects-list">
+        <p class="panel-empty">Cargando...</p>
+      </div>
+    </div>
 
     <div id="messages">
       <div class="welcome">

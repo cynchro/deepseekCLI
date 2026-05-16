@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -56,6 +57,9 @@ class RunRequest(BaseModel):
     args: str = ""      # tarea o cambio (para build/update)
     project_dir: str = ""  # directorio del proyecto (opcional)
 
+class DeleteProjectRequest(BaseModel):
+    path: str
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -103,6 +107,53 @@ async def new_conversation(authorization: str | None = Header(None)):
     sid = str(uuid.uuid4())
     sessions[sid] = [{"role": "system", "content": SYSTEM_PROMPT}]
     return {"session_id": sid}
+
+
+@app.get("/api/projects")
+async def list_projects(authorization: str | None = Header(None)):
+    _check_auth(authorization)
+    if not BUILD_DIR.exists():
+        return {"projects": []}
+    projects = []
+    for item in sorted(BUILD_DIR.iterdir()):
+        if not item.is_dir():
+            continue
+        ctx_file = item / ".deep" / "context.json"
+        if not ctx_file.exists():
+            continue
+        try:
+            import json as _json
+            ctx = _json.loads(ctx_file.read_text(encoding="utf-8"))
+        except Exception:
+            ctx = {}
+        files = [
+            f for f in item.rglob("*")
+            if f.is_file() and ".deep" not in f.parts and not f.name.startswith(".")
+        ]
+        projects.append({
+            "name": item.name,
+            "path": str(item),
+            "task": ctx.get("task", ""),
+            "last_update": ctx.get("last_update", ""),
+            "timestamp": ctx.get("timestamp", ""),
+            "updated_at": ctx.get("updated_at", ""),
+            "file_count": len(files),
+        })
+    return {"projects": projects}
+
+
+@app.delete("/api/projects")
+async def delete_project(req: DeleteProjectRequest, authorization: str | None = Header(None)):
+    _check_auth(authorization)
+    path = Path(req.path).resolve()
+    try:
+        path.relative_to(BUILD_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ruta no permitida")
+    if not path.exists() or not path.is_dir():
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    shutil.rmtree(path)
+    return {"ok": True}
 
 
 @app.post("/api/run")
