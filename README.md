@@ -12,7 +12,7 @@ O desde el repositorio clonado:
 
 ```bash
 git clone https://github.com/cynchro/deepseekCLI.git
-cd deepseekcli
+cd deepseekCLI
 bash install.sh
 ```
 
@@ -40,42 +40,96 @@ deep
 
 Abre un REPL con autocompletado e historial. Desde ahí podés usar todos los comandos.
 
-```
-deep ❯ build una API REST en FastAPI con autenticación JWT
-deep ❯ fix
-deep ❯ balance
-deep ❯ history
-```
-
 ### Modo directo (scripting)
 
+Todos los comandos también funcionan directamente desde la terminal:
+
 ```bash
-# Genera un proyecto en el directorio actual
 deep build "API REST en FastAPI con autenticación JWT"
-
-# Genera y corrige automáticamente si la evaluación falla
-deep build "app Flask con SQLite" -f
-
-# Especifica el directorio de salida
-deep build "landing page en HTML/CSS" -o ~/proyectos/landing
-
-# Usa deepseek-reasoner para tareas complejas
-deep build "compilador de expresiones matemáticas" --model deepseek-reasoner
-
-# Muestra el crédito disponible
-deep balance
-
-# Muestra el historial de proyectos generados
-deep history
-
-# Muestra la API key guardada
-deep config
-
-# Actualiza la API key
-deep config set-key
+deep ask "cómo funciona Redis?"
+deep doctor
 ```
 
-## Cómo funciona
+## Comandos
+
+### `build` — Genera un proyecto
+
+```bash
+deep build "descripción del proyecto"
+deep build "app Flask con SQLite" -f              # corrige automáticamente si falla
+deep build "landing page en HTML/CSS" -o ~/dir   # especifica directorio de salida
+deep build "compilador de expresiones" --model deepseek-reasoner
+```
+
+### `ask` — Conversación con el modelo
+
+```bash
+deep ask "cómo funciona Redis?"
+```
+
+Dentro del REPL, `ask` inicia una nueva conversación. El prompt cambia a `chat ❯` y podés seguir preguntando sin repetir el comando:
+
+```
+deep ❯ ask qué es Redis?
+...respuesta...
+
+chat ❯ es necesario dockerizarlo?    ← sigue el hilo automáticamente
+...respuesta contextual...
+
+chat ❯ ask qué es Kafka?             ← ask resetea e inicia nueva conversación
+```
+
+### `update` — Modifica un proyecto existente
+
+```bash
+deep update "agregá autenticación JWT"
+deep update "agregá tests unitarios" --model deepseek-reasoner
+```
+
+Modifica los archivos del proyecto en el directorio actual sin tener que regenerarlo desde cero.
+
+### `fix` — Corrige errores del proyecto actual
+
+```bash
+deep fix
+```
+
+Usa el contexto guardado en `.deep/` para corregir el proyecto sin necesidad de volver a describir la tarea.
+
+### `show` — Muestra el contexto del proyecto actual
+
+```bash
+deep show
+```
+
+Muestra la tarea original, el modelo usado, el plan, los archivos generados y el resultado de la evaluación.
+
+### `doctor` — Diagnóstico del entorno
+
+```bash
+deep doctor
+```
+
+Verifica Python, API key, conexión con DeepSeek, dependencias y configuración del PATH.
+
+### `upgrade` — Actualiza el CLI
+
+```bash
+deep upgrade
+```
+
+Descarga e instala la última versión desde GitHub sin necesidad de reinstalar manualmente.
+
+### `balance` / `history` / `config`
+
+```bash
+deep balance            # muestra el crédito disponible en DeepSeek
+deep history            # muestra las experiencias acumuladas de builds anteriores
+deep config             # muestra la API key guardada
+deep config set-key     # guarda una nueva API key
+```
+
+## Cómo funciona `build`
 
 Cada `deep build` ejecuta 5 fases:
 
@@ -89,7 +143,7 @@ Si la evaluación falla, `deep` te pregunta si querés corregirlo automáticamen
 
 ## Reglas personalizadas (.deeprules)
 
-Podés definir restricciones que DeepSeek debe respetar en cada build. Crea un archivo `.deeprules` en tu directorio:
+Podés definir restricciones que DeepSeek debe respetar en cada `build` y `update`. Crea un archivo `.deeprules` en tu directorio:
 
 ```bash
 cp .deeprules.example .deeprules
@@ -103,7 +157,7 @@ no hardcodees credenciales
 separá la lógica de negocio de los controladores
 ```
 
-Las reglas se cargan automáticamente si el archivo existe en el directorio actual o en el directorio de salida del proyecto.
+Las reglas se cargan automáticamente si el archivo existe en el directorio actual.
 
 ## Requisitos
 
@@ -131,4 +185,4 @@ mi-proyecto/
 └── ... archivos del proyecto
 ```
 
-El comando `fix` usa ese contexto para corregir el proyecto sin tener que volver a describir la tarea.
+Los comandos `fix`, `update` y `show` usan ese contexto automáticamente.
