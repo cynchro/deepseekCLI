@@ -99,7 +99,7 @@ def _parse(line: str):
     return parts[0].lower(), parts[1:]
 
 
-def _handle(cmd: str, args: list, api_key: str):
+def _handle(cmd: str, args: list, api_key: str, state: dict):
     if cmd in ("exit", "quit", "q"):
         return False                       # señal de salida
 
@@ -116,7 +116,10 @@ def _handle(cmd: str, args: list, api_key: str):
         if not args:
             print("  Uso: ask <pregunta>")
         else:
-            run_ask(" ".join(args), api_key)
+            state["ask_history"] = run_ask(
+                " ".join(args), api_key,
+                history=state.get("ask_history"),
+            )
 
     elif cmd == "update":
         if not args:
@@ -199,6 +202,7 @@ def _run_rich(api_key: str):
         style=_STYLE,
         complete_while_typing=True,
     )
+    state: dict = {}
     while True:
         try:
             project = _detect_project()
@@ -212,12 +216,13 @@ def _run_rich(api_key: str):
         cmd, args = _parse(line)
         if cmd is None:
             continue
-        if not _handle(cmd, args, api_key):
+        if not _handle(cmd, args, api_key, state):
             print("👋 Hasta luego!")
             break
 
 
 def _run_basic(api_key: str):
+    state: dict = {}
     while True:
         try:
             project = _detect_project()
@@ -228,6 +233,6 @@ def _run_basic(api_key: str):
         cmd, args = _parse(line)
         if cmd is None:
             continue
-        if not _handle(cmd, args, api_key):
+        if not _handle(cmd, args, api_key, state):
             print("👋 Hasta luego!")
             break

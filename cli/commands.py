@@ -186,24 +186,49 @@ def run_history():
     show_history(experiences)
 
 
-def run_ask(question: str, api_key: str, model: str = "deepseek-chat") -> None:
+def run_ask(question: str, api_key: str, model: str = "deepseek-chat",
+            history: list = None) -> list:
+    """Envía una pregunta manteniendo el historial de la conversación.
+    Devuelve el historial actualizado para pasarlo en la próxima llamada."""
     from core.client import DeepSeekClient
     client = DeepSeekClient(api_key, model=model)
+
+    messages = list(history) if history else [
+        {"role": "system", "content": (
+            "Sos un asistente experto en programación y tecnología. "
+            "Respondé en el mismo idioma de la pregunta."
+        )}
+    ]
+    messages.append({"role": "user", "content": question})
+
     spinner = Spinner()
     print()
     spinner.start()
-    result = client.chat(
-        question,
-        system_prompt="Sos un asistente experto en programación y tecnología. Respondé en el mismo idioma de la pregunta.",
-        temperature=0.7, max_tokens=3000,
-    )
-    spinner.stop()
+
+    content = None
+    try:
+        raw = client.chat_with_context(messages, temperature=0.7, max_tokens=3000)
+        spinner.stop()
+        content = raw["choices"][0]["message"]["content"]
+    except Exception:
+        # chat_with_context falló, fallback a chat simple
+        spinner.stop()
+        result = client.chat(
+            question,
+            system_prompt=messages[0]["content"],
+            temperature=0.7, max_tokens=3000,
+        )
+        if result.get("success"):
+            content = result["content"]
+
     print()
-    if result.get("success"):
-        print(result["content"])
+    if content:
+        print(content)
+        messages.append({"role": "assistant", "content": content})
     else:
-        print(f"❌ {result.get('content', 'Error desconocido')}")
+        print("❌ No se obtuvo respuesta.")
     print()
+    return messages
 
 
 def run_update(change: str, api_key: str, project_dir: Path,
