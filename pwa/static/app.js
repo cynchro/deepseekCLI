@@ -1,22 +1,33 @@
 marked.setOptions({ breaks: true, gfm: true });
 
-let password  = localStorage.getItem('deep_password') || '';
-let sessionId = localStorage.getItem('deep_session')  || '';
+let password   = localStorage.getItem('deep_password')  || '';
+let sessionId  = localStorage.getItem('deep_session')   || '';
+let workspace  = localStorage.getItem('deep_workspace') || '';
 
-const authScreen = document.getElementById('auth-screen');
-const chatScreen = document.getElementById('chat-screen');
-const passInput  = document.getElementById('password-input');
-const authBtn    = document.getElementById('auth-btn');
-const authError  = document.getElementById('auth-error');
-const messagesEl = document.getElementById('messages');
-const inputEl    = document.getElementById('input');
-const sendBtn    = document.getElementById('send-btn');
-const newChatBtn = document.getElementById('new-chat-btn');
-const balanceBtn = document.getElementById('balance-btn');
+const authScreen     = document.getElementById('auth-screen');
+const chatScreen     = document.getElementById('chat-screen');
+const passInput      = document.getElementById('password-input');
+const authBtn        = document.getElementById('auth-btn');
+const authError      = document.getElementById('auth-error');
+const messagesEl     = document.getElementById('messages');
+const inputEl        = document.getElementById('input');
+const sendBtn        = document.getElementById('send-btn');
+const newChatBtn     = document.getElementById('new-chat-btn');
+const balanceBtn     = document.getElementById('balance-btn');
+const workspaceLabel = document.getElementById('workspace-label');
+
+function updateWorkspaceLabel() {
+  if (workspaceLabel) {
+    workspaceLabel.textContent = workspace
+      ? workspace.replace(/^\/home\/\w+/, '~')
+      : '';
+  }
+}
+updateWorkspaceLabel();
 
 // ── Comandos reconocidos ──────────────────────────────────────────────────────
 
-const COMMANDS = ['build', 'update', 'fix', 'show', 'history', 'balance', 'doctor', 'upgrade'];
+const COMMANDS = ['build', 'update', 'fix', 'show', 'history', 'balance', 'doctor', 'upgrade', 'workspace'];
 
 function parseCommand(text) {
   const parts = text.trim().match(/^(\w+)\s*([\s\S]*)$/);
@@ -151,15 +162,28 @@ async function runCommand(cmd, args, loadingEl) {
     loadingEl.textContent = `⚙️ Ejecutando ${cmd}... (puede tardar un momento)`;
   }
 
+  const body = { command: cmd, args, project_dir: workspace };
+
   const res = await fetch('/api/run', {
     method: 'POST',
     headers: jsonHeaders(),
-    body: JSON.stringify({ command: cmd, args }),
+    body: JSON.stringify(body),
   });
 
   if (res.status === 401) { logout(); return; }
 
   const data = await res.json();
+
+  // Si es workspace y fue exitoso, guardar en localStorage
+  if (cmd === 'workspace' && data.output && !data.output.startsWith('❌')) {
+    const match = data.output.match(/`([^`]+)`/);
+    if (match) {
+      workspace = match[1];
+      localStorage.setItem('deep_workspace', workspace);
+      updateWorkspaceLabel();
+    }
+  }
+
   setLoading(loadingEl, data.output || '✅ Listo.');
 }
 
@@ -202,13 +226,14 @@ inputEl.addEventListener('input', () => {
   const val  = inputEl.value.trim().toLowerCase();
   const hint = document.getElementById('cmd-hint');
   const map  = {
-    'build':   'build "descripción del proyecto"',
-    'update':  'update "cambio a aplicar"',
-    'fix':     'fix',
-    'show':    'show',
-    'history': 'history',
-    'balance': 'balance',
-    'doctor':  'doctor',
+    'build':     'build "descripción del proyecto"',
+    'update':    'update "cambio a aplicar"',
+    'fix':       'fix',
+    'show':      'show',
+    'history':   'history',
+    'balance':   'balance',
+    'doctor':    'doctor',
+    'workspace': 'workspace /ruta/del/directorio',
   };
   const match = Object.keys(map).find(k => val === k || val.startsWith(k + ' '));
   if (hint) {

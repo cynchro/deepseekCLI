@@ -94,12 +94,30 @@ header {
   flex-shrink: 0;
 }
 
+.header-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
 .logo {
   font-family: monospace;
   font-size: 1.25rem;
   font-weight: bold;
   color: var(--accent);
   letter-spacing: 1px;
+  flex-shrink: 0;
+}
+
+.workspace-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 
 .header-actions { display: flex; gap: 8px; }

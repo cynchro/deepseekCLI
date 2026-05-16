@@ -183,6 +183,21 @@ async def run_command(req: RunRequest, authorization: str | None = Header(None))
         output = _capture(run_update, req.args, DEEPSEEK_API_KEY, project_dir)
         return {"output": output or "✅ Actualización completada."}
 
+    # ── workspace ─────────────────────────────────────────────────────────────
+    if cmd == "workspace":
+        if not req.args:
+            return {"output": "❌ Uso: `workspace /ruta/del/directorio`"}
+        path = Path(req.args).expanduser().resolve()
+        if not path.exists():
+            try:
+                path.mkdir(parents=True)
+                return {"output": f"📁 Directorio creado y workspace establecido en:\n\n`{path}`"}
+            except Exception as e:
+                return {"output": f"❌ No se pudo crear el directorio: {e}"}
+        if not path.is_dir():
+            return {"output": f"❌ `{path}` no es un directorio."}
+        return {"output": f"✅ Workspace establecido en:\n\n`{path}`"}
+
     return {"output": f"❌ Comando desconocido: `{cmd}`"}
 
 
