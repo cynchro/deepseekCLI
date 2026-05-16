@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: deepseekcli
+Version: 0.1.0
+Summary: CLI/REPL para generar proyectos con DeepSeek
+Requires-Python: >=3.9
+Requires-Dist: requests>=2.28

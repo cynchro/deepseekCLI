@@ -1,0 +1,2 @@
+[console_scripts]
+deep = deep:main

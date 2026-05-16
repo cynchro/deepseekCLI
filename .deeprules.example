@@ -1,0 +1,27 @@
+# .deeprules — Reglas para deep build
+# Una regla por línea. Las líneas con # son comentarios. Las líneas vacías se ignoran.
+# Copiá este archivo como .deeprules en tu directorio de proyecto o en el directorio
+# desde donde ejecutás el comando deep.
+
+# --- Principios de diseño ---
+usa principios SOLID
+usa clean code
+aplica el principio DRY (Don't Repeat Yourself)
+aplica el principio KISS (Keep It Simple)
+
+# --- Estilo de código ---
+usa nombres descriptivos en variables, funciones y clases
+no uses abreviaciones confusas
+no escribas comentarios obvios, solo los que explican el "por qué"
+
+# --- Estructura ---
+seguí la misma estructura de carpetas del proyecto existente
+separá la lógica de negocio de los controladores
+usá un archivo de configuración centralizado para constantes
+
+# --- Seguridad ---
+validá siempre los inputs del usuario
+no hardcodees credenciales ni API keys en el código
+
+# --- Testing ---
+el código debe ser testeable (inyección de dependencias donde corresponda)
