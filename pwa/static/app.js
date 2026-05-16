@@ -14,7 +14,12 @@ const inputEl        = document.getElementById('input');
 const sendBtn        = document.getElementById('send-btn');
 const newChatBtn     = document.getElementById('new-chat-btn');
 const balanceBtn     = document.getElementById('balance-btn');
+const projectsBtn    = document.getElementById('projects-btn');
 const workspaceLabel = document.getElementById('workspace-label');
+const projectsPanel  = document.getElementById('projects-panel');
+const panelOverlay   = document.getElementById('panel-overlay');
+const closePanelBtn  = document.getElementById('close-panel-btn');
+const projectsList   = document.getElementById('projects-list');
 
 function updateWorkspaceLabel() {
   if (workspaceLabel) {
@@ -262,6 +267,107 @@ document.querySelectorAll('.chip').forEach(chip => {
     inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
   });
 });
+
+// ── Panel de proyectos ────────────────────────────────────────────────────────
+
+function openProjectsPanel() {
+  projectsPanel.classList.remove('hidden');
+  panelOverlay.classList.remove('hidden');
+  loadProjects();
+}
+
+function closeProjectsPanel() {
+  projectsPanel.classList.add('hidden');
+  panelOverlay.classList.add('hidden');
+}
+
+projectsBtn.addEventListener('click', openProjectsPanel);
+closePanelBtn.addEventListener('click', closeProjectsPanel);
+panelOverlay.addEventListener('click', closeProjectsPanel);
+
+async function loadProjects() {
+  projectsList.innerHTML = '<p class="panel-empty">Cargando...</p>';
+  try {
+    const res = await fetch('/api/projects', { headers: authHeaders() });
+    if (res.status === 401) { logout(); return; }
+    const data = await res.json();
+    renderProjects(data.projects);
+  } catch {
+    projectsList.innerHTML = '<p class="panel-empty">Error al cargar proyectos.</p>';
+  }
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  return iso.slice(0, 16).replace('T', ' ');
+}
+
+function truncate(str, n) {
+  return str.length > n ? str.slice(0, n) + '…' : str;
+}
+
+function renderProjects(projects) {
+  if (!projects.length) {
+    projectsList.innerHTML = '<p class="panel-empty">No hay proyectos todavía.<br>Usá <code>build</code> para crear uno.</p>';
+    return;
+  }
+  projectsList.innerHTML = '';
+  for (const p of projects) {
+    const date = fmtDate(p.updated_at || p.timestamp);
+    const card = document.createElement('div');
+    card.className = 'proj-card';
+    card.innerHTML = `
+      <div class="proj-info">
+        <div class="proj-name">${p.name}</div>
+        <div class="proj-task">${truncate(p.task, 90)}</div>
+        ${p.last_update ? `<div class="proj-update">🔧 ${truncate(p.last_update, 60)}</div>` : ''}
+        <div class="proj-meta">${p.file_count} archivos · ${date}</div>
+      </div>
+      <div class="proj-actions">
+        <button class="proj-select-btn">Abrir</button>
+        <button class="proj-delete-btn">🗑</button>
+      </div>
+    `;
+    card.querySelector('.proj-select-btn').addEventListener('click', () => selectProject(p.path, p.name));
+    card.querySelector('.proj-delete-btn').addEventListener('click', (e) => deleteProject(p.path, p.name, e.currentTarget, card));
+    projectsList.appendChild(card);
+  }
+}
+
+async function selectProject(path, name) {
+  workspace = path;
+  localStorage.setItem('deep_workspace', path);
+  updateWorkspaceLabel();
+  closeProjectsPanel();
+  const loading = addMessage('assistant', '...', true);
+  await runCommand('show', '', loading);
+}
+
+async function deleteProject(path, name, btn, card) {
+  if (!confirm(`¿Eliminar el proyecto "${name}"?\nEsta acción no se puede deshacer.`)) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/projects', {
+      method: 'DELETE',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ path }),
+    });
+    if (res.status === 401) { logout(); return; }
+    if (res.ok) {
+      card.remove();
+      if (!projectsList.querySelector('.proj-card')) {
+        projectsList.innerHTML = '<p class="panel-empty">No hay proyectos todavía.<br>Usá <code>build</code> para crear uno.</p>';
+      }
+    } else {
+      const data = await res.json();
+      alert(data.detail || 'Error al eliminar el proyecto.');
+      btn.disabled = false;
+    }
+  } catch {
+    alert('Error de conexión.');
+    btn.disabled = false;
+  }
+}
 
 // ── PWA ───────────────────────────────────────────────────────────────────────
 
