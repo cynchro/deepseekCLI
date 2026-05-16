@@ -80,7 +80,11 @@ def _detect_project() -> str:
     return ""
 
 
-def _prompt_text(project: str) -> "HTML | str":
+def _prompt_text(project: str, in_chat: bool = False) -> "HTML | str":
+    if in_chat:
+        if not _HAS_PROMPT_TOOLKIT:
+            return "chat ❯ "
+        return HTML('<deep>chat</deep><arrow> ❯ </arrow> ')
     if not _HAS_PROMPT_TOOLKIT:
         prefix = f"[{project}] " if project else ""
         return f"{prefix}deep ❯ "
@@ -116,10 +120,9 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
         if not args:
             print("  Uso: ask <pregunta>")
         else:
-            state["ask_history"] = run_ask(
-                " ".join(args), api_key,
-                history=state.get("ask_history"),
-            )
+            # Siempre resetea el historial — nueva conversación
+            state["ask_history"] = run_ask(" ".join(args), api_key, history=None)
+            state["in_conversation"] = True
 
     elif cmd == "update":
         if not args:
@@ -176,6 +179,11 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
             verbose=False, auto_fix=auto_fix,
         )
 
+    elif state.get("in_conversation"):
+        # Texto libre → continúa la conversación activa
+        full_input = (cmd + " " + " ".join(args)).strip()
+        state["ask_history"] = run_ask(full_input, api_key, history=state.get("ask_history"))
+
     else:
         print(f"  Comando desconocido: '{cmd}'. Escribí 'help'.")
 
@@ -206,7 +214,7 @@ def _run_rich(api_key: str):
     while True:
         try:
             project = _detect_project()
-            line = session.prompt(_prompt_text(project))
+            line = session.prompt(_prompt_text(project, state.get("in_conversation", False)))
         except KeyboardInterrupt:
             continue
         except EOFError:
@@ -226,7 +234,7 @@ def _run_basic(api_key: str):
     while True:
         try:
             project = _detect_project()
-            line = input(_prompt_text(project))
+            line = input(_prompt_text(project, state.get("in_conversation", False)))
         except (EOFError, KeyboardInterrupt):
             print("\n👋 Hasta luego!")
             break
