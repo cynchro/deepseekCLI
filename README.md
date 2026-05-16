@@ -5,13 +5,13 @@ CLI/REPL para generar proyectos completos usando la API de DeepSeek. Le das una 
 ## Instalación
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/TU_USUARIO/deepseekcli/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/cynchro/deepseekCLI/main/install.sh)
 ```
 
 O desde el repositorio clonado:
 
 ```bash
-git clone https://github.com/TU_USUARIO/deepseekcli.git
+git clone https://github.com/cynchro/deepseekCLI.git
 cd deepseekcli
 bash install.sh
 ```
