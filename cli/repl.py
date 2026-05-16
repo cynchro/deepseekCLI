@@ -17,7 +17,8 @@ except ImportError:
 
 from core.rules import load_rules
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
-                          run_ask, run_update, run_doctor, run_upgrade, run_show)
+                          run_ask, run_update, run_doctor, run_upgrade, run_show,
+                          run_serve)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -36,6 +37,7 @@ _HELP = """
   ask <pregunta>         Hace una pregunta sin generar proyecto
   fix                    Corrige errores del proyecto actual
   show                   Muestra contexto y archivos del proyecto actual
+  serve                  Inicia el servidor web para usar deep desde el celular
   doctor                 Verifica que todo esté configurado correctamente
   upgrade                Actualiza deep CLI desde GitHub
   balance                Muestra el crédito disponible
@@ -58,6 +60,7 @@ _COMPLETER = NestedCompleter.from_nested_dict({
     "ask":     None,
     "fix":     None,
     "show":    None,
+    "serve":   None,
     "doctor":  None,
     "upgrade": None,
     "balance": None,
@@ -133,6 +136,10 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
 
     elif cmd == "show":
         run_show(Path.cwd())
+
+    elif cmd == "serve":
+        port = int(args[0]) if args and args[0].isdigit() else 8000
+        run_serve(port=port)
 
     elif cmd == "doctor":
         run_doctor()

@@ -9,6 +9,9 @@ description = "CLI/REPL para generar proyectos con DeepSeek"
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.28",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
 ]
 
 [project.scripts]
@@ -18,4 +21,7 @@ deep = "deep:main"
 py-modules = ["deep"]
 
 [tool.setuptools.packages.find]
-include = ["cli*", "core*"]
+include = ["cli*", "core*", "pwa*"]
+
+[tool.setuptools.package-data]
+pwa = ["static/*"]

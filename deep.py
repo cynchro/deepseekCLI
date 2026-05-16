@@ -100,6 +100,16 @@ def _legacy(argv: list):
 
     p_doc.set_defaults(func=do_doctor)
 
+    # ── serve ────────────────────────────────────────────────────────────────
+    p_srv = sub.add_parser("serve", help="Inicia el servidor web para usar deep desde el celular")
+    p_srv.add_argument("--port", type=int, default=8000, metavar="PUERTO")
+
+    def do_serve(args):
+        from cli.commands import run_serve
+        run_serve(port=args.port)
+
+    p_srv.set_defaults(func=do_serve)
+
     # ── upgrade ──────────────────────────────────────────────────────────────
     p_upg = sub.add_parser("upgrade", help="Actualiza deep CLI desde GitHub")
 

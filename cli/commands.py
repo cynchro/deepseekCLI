@@ -327,6 +327,60 @@ def run_doctor() -> None:
     print()
 
 
+def run_serve(port: int = 8000) -> None:
+    import socket
+    # Buscar pwa/ tanto en repo local como en el paquete instalado
+    try:
+        import pwa as _pwa_pkg
+        pwa_dir = Path(_pwa_pkg.__file__).parent
+    except ImportError:
+        pwa_dir = Path(__file__).parent.parent / "pwa"
+
+    if not pwa_dir.exists() or not (pwa_dir / "main.py").exists():
+        print("❌ No se encontró el servidor web. Actualizá con: deep upgrade")
+        return
+
+    # IP de Tailscale
+    ts_ip = None
+    try:
+        r = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True)
+        if r.returncode == 0:
+            ts_ip = r.stdout.strip()
+    except FileNotFoundError:
+        pass
+
+    # IP local (fallback)
+    local_ip = None
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+
+    print(f"\n  🚀 Servidor deep iniciando en puerto {port}\n")
+    if ts_ip:
+        print(f"  📱 Desde tu celular (Tailscale):")
+        print(f"     http://{ts_ip}:{port}\n")
+    if local_ip:
+        print(f"  🖥️  Red local:")
+        print(f"     http://{local_ip}:{port}\n")
+    print("  Ctrl+C para detener\n")
+
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "uvicorn", "main:app",
+             "--host", "0.0.0.0", "--port", str(port)],
+            cwd=str(pwa_dir),
+        )
+    except KeyboardInterrupt:
+        print("\n  Servidor detenido.")
+    except Exception as e:
+        print(f"❌ Error al iniciar el servidor: {e}")
+        print("   Instalá uvicorn con: pip install uvicorn")
+
+
 def run_upgrade() -> None:
     venv_pip = Path.home() / ".local" / "share" / "deepseekcli" / "bin" / "pip"
     if not venv_pip.exists():
