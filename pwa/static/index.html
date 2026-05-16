@@ -37,11 +37,23 @@
     <div id="messages">
       <div class="welcome">
         <p>¿En qué puedo ayudarte?</p>
+        <div class="cmd-chips">
+          <span class="chip">💬 ask</span>
+          <span class="chip">🏗 build</span>
+          <span class="chip">🔧 fix</span>
+          <span class="chip">✏️ update</span>
+          <span class="chip">📄 show</span>
+          <span class="chip">📜 history</span>
+          <span class="chip">💰 balance</span>
+        </div>
       </div>
     </div>
 
     <div id="input-area">
-      <textarea id="input" placeholder="Preguntá algo..." rows="1"></textarea>
+      <div id="input-wrapper">
+        <textarea id="input" placeholder="Preguntá algo, o escribí build / fix / show…" rows="1"></textarea>
+        <span id="cmd-hint"></span>
+      </div>
       <button id="send-btn">&#8593;</button>
     </div>
   </div>

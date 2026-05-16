@@ -1,28 +1,36 @@
 marked.setOptions({ breaks: true, gfm: true });
 
-let password = localStorage.getItem('deep_password') || '';
-let sessionId = localStorage.getItem('deep_session') || '';
+let password  = localStorage.getItem('deep_password') || '';
+let sessionId = localStorage.getItem('deep_session')  || '';
 
-const authScreen  = document.getElementById('auth-screen');
-const chatScreen  = document.getElementById('chat-screen');
-const passInput   = document.getElementById('password-input');
-const authBtn     = document.getElementById('auth-btn');
-const authError   = document.getElementById('auth-error');
-const messagesEl  = document.getElementById('messages');
-const inputEl     = document.getElementById('input');
-const sendBtn     = document.getElementById('send-btn');
-const newChatBtn  = document.getElementById('new-chat-btn');
-const balanceBtn  = document.getElementById('balance-btn');
+const authScreen = document.getElementById('auth-screen');
+const chatScreen = document.getElementById('chat-screen');
+const passInput  = document.getElementById('password-input');
+const authBtn    = document.getElementById('auth-btn');
+const authError  = document.getElementById('auth-error');
+const messagesEl = document.getElementById('messages');
+const inputEl    = document.getElementById('input');
+const sendBtn    = document.getElementById('send-btn');
+const newChatBtn = document.getElementById('new-chat-btn');
+const balanceBtn = document.getElementById('balance-btn');
+
+// ── Comandos reconocidos ──────────────────────────────────────────────────────
+
+const COMMANDS = ['build', 'update', 'fix', 'show', 'history', 'balance', 'doctor', 'upgrade'];
+
+function parseCommand(text) {
+  const parts = text.trim().match(/^(\w+)\s*([\s\S]*)$/);
+  if (!parts) return null;
+  const cmd  = parts[1].toLowerCase();
+  const args = parts[2].trim().replace(/^["']|["']$/g, ''); // quitar comillas
+  if (COMMANDS.includes(cmd)) return { cmd, args };
+  return null;
+}
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-function authHeaders() {
-  return { 'Authorization': `Bearer ${password}` };
-}
-
-function jsonHeaders() {
-  return { ...authHeaders(), 'Content-Type': 'application/json' };
-}
+function authHeaders()  { return { 'Authorization': `Bearer ${password}` }; }
+function jsonHeaders()  { return { ...authHeaders(), 'Content-Type': 'application/json' }; }
 
 async function tryLogin() {
   const pwd = passInput.value.trim();
@@ -53,7 +61,6 @@ function logout() {
   location.reload();
 }
 
-// Auto-login si hay password guardada
 if (password) {
   fetch('/api/health', { headers: authHeaders() })
     .then(r => r.ok ? showChat() : (localStorage.removeItem('deep_password'), null))
@@ -65,12 +72,9 @@ passInput.addEventListener('keydown', e => e.key === 'Enter' && tryLogin());
 
 // ── Mensajes ──────────────────────────────────────────────────────────────────
 
-function scrollDown() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
-}
+function scrollDown() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
 function addMessage(role, text, loading = false) {
-  // Ocultar bienvenida al primer mensaje
   const welcome = messagesEl.querySelector('.welcome');
   if (welcome) welcome.remove();
 
@@ -88,7 +92,13 @@ function addMessage(role, text, loading = false) {
   return div;
 }
 
-// ── Send ──────────────────────────────────────────────────────────────────────
+function setLoading(el, text) {
+  el.className = 'message assistant';
+  el.innerHTML = marked.parse(text);
+  scrollDown();
+}
+
+// ── Enviar ────────────────────────────────────────────────────────────────────
 
 async function send() {
   const text = inputEl.value.trim();
@@ -101,66 +111,77 @@ async function send() {
   addMessage('user', text);
   const loading = addMessage('assistant', '...', true);
 
+  const parsed = parseCommand(text);
+
   try {
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ message: text, session_id: sessionId }),
-    });
-
-    if (res.status === 401) { logout(); return; }
-
-    const data = await res.json();
-    sessionId = data.session_id;
-    localStorage.setItem('deep_session', sessionId);
-
-    loading.className = 'message assistant';
-    loading.innerHTML = marked.parse(data.response);
-    scrollDown();
-  } catch {
-    loading.className = 'message assistant';
-    loading.textContent = '❌ Error al conectar con el servidor.';
+    if (parsed) {
+      await runCommand(parsed.cmd, parsed.args, loading);
+    } else {
+      await runAsk(text, loading);
+    }
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
   }
 }
 
-// ── Nueva conversación ────────────────────────────────────────────────────────
+// ── Ask (conversación) ────────────────────────────────────────────────────────
 
-async function newChat() {
-  try {
-    const res = await fetch('/api/new', { method: 'POST', headers: jsonHeaders() });
-    if (res.status === 401) { logout(); return; }
-    const data = await res.json();
-    sessionId = data.session_id;
-    localStorage.setItem('deep_session', sessionId);
-    messagesEl.innerHTML = '<div class="welcome"><p>¿En qué puedo ayudarte?</p></div>';
-  } catch {
-    addMessage('assistant', '❌ No se pudo crear una nueva conversación.');
-  }
+async function runAsk(text, loadingEl) {
+  const res = await fetch('/api/ask', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ message: text, session_id: sessionId }),
+  });
+
+  if (res.status === 401) { logout(); return; }
+
+  const data = await res.json();
+  sessionId = data.session_id;
+  localStorage.setItem('deep_session', sessionId);
+  setLoading(loadingEl, data.response);
 }
 
-// ── Balance ───────────────────────────────────────────────────────────────────
+// ── Comandos CLI ──────────────────────────────────────────────────────────────
 
-async function showBalance() {
-  try {
-    const res = await fetch('/api/balance', { headers: authHeaders() });
-    if (res.status === 401) { logout(); return; }
-    const data = await res.json();
-    const total    = data.balance?.total_balance    ?? data.balance?.available ?? '?';
-    const currency = data.balance?.currency ?? 'USD';
-    addMessage('assistant', `**Crédito disponible:** ${total} ${currency}`);
-  } catch {
-    addMessage('assistant', '❌ No se pudo obtener el balance.');
+const SLOW_COMMANDS = ['build', 'update', 'fix'];
+
+async function runCommand(cmd, args, loadingEl) {
+  if (SLOW_COMMANDS.includes(cmd)) {
+    loadingEl.textContent = `⚙️ Ejecutando ${cmd}... (puede tardar un momento)`;
   }
+
+  const res = await fetch('/api/run', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ command: cmd, args }),
+  });
+
+  if (res.status === 401) { logout(); return; }
+
+  const data = await res.json();
+  setLoading(loadingEl, data.output || '✅ Listo.');
 }
 
-// ── Eventos ───────────────────────────────────────────────────────────────────
+// ── Botones del header ────────────────────────────────────────────────────────
+
+newChatBtn.addEventListener('click', async () => {
+  const res = await fetch('/api/new', { method: 'POST', headers: jsonHeaders() });
+  if (res.status === 401) { logout(); return; }
+  const data = await res.json();
+  sessionId = data.session_id;
+  localStorage.setItem('deep_session', sessionId);
+  messagesEl.innerHTML = '<div class="welcome"><p>¿En qué puedo ayudarte?</p></div>';
+});
+
+balanceBtn.addEventListener('click', async () => {
+  const loading = addMessage('assistant', '...', true);
+  await runCommand('balance', '', loading);
+});
+
+// ── Input events ──────────────────────────────────────────────────────────────
 
 sendBtn.addEventListener('click', send);
-newChatBtn.addEventListener('click', newChat);
-balanceBtn.addEventListener('click', showBalance);
 
 inputEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -174,7 +195,50 @@ inputEl.addEventListener('input', () => {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
 });
 
-// ── PWA service worker ────────────────────────────────────────────────────────
+// ── Hint de comandos ──────────────────────────────────────────────────────────
+// Muestra un tooltip sutil cuando el usuario empieza a escribir un comando
+
+inputEl.addEventListener('input', () => {
+  const val  = inputEl.value.trim().toLowerCase();
+  const hint = document.getElementById('cmd-hint');
+  const map  = {
+    'build':   'build "descripción del proyecto"',
+    'update':  'update "cambio a aplicar"',
+    'fix':     'fix',
+    'show':    'show',
+    'history': 'history',
+    'balance': 'balance',
+    'doctor':  'doctor',
+  };
+  const match = Object.keys(map).find(k => val === k || val.startsWith(k + ' '));
+  if (hint) {
+    hint.textContent = match ? `💡 ${map[match]}` : '';
+  }
+});
+
+// ── Chips de comandos ─────────────────────────────────────────────────────────
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const cmd = chip.textContent.replace(/^\S+\s/, '').trim(); // quitar emoji
+    const templates = {
+      'ask':     'ask ',
+      'build':   'build "',
+      'fix':     'fix',
+      'update':  'update "',
+      'show':    'show',
+      'history': 'history',
+      'balance': 'balance',
+    };
+    inputEl.value = templates[cmd] || cmd + ' ';
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event('input'));
+    // mover cursor al final
+    inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+  });
+});
+
+// ── PWA ───────────────────────────────────────────────────────────────────────
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => null);

@@ -218,6 +218,38 @@ header {
   margin: 8px 0;
 }
 
+/* ── Welcome chips ────────────────────────────────────── */
+
+.welcome {
+  margin: auto;
+  color: var(--muted);
+  font-size: 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.cmd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.chip:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ── Input area ───────────────────────────────────────── */
 
 #input-area {
@@ -230,8 +262,22 @@ header {
   flex-shrink: 0;
 }
 
-#input {
+#input-wrapper {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#cmd-hint {
+  font-size: 0.75rem;
+  color: var(--accent);
+  padding-left: 4px;
+  min-height: 16px;
+}
+
+#input {
+  width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
