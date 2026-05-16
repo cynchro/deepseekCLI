@@ -108,6 +108,21 @@ header {
   color: var(--accent);
   letter-spacing: 1px;
   flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cmd-palette {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.cmd-palette .cmd-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .workspace-label {
