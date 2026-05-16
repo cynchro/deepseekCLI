@@ -161,6 +161,62 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
 
         return {"success": success, "files_fixed": fixed_files, "outcome": new_outcome}
 
+    def execute_update(self, change: str, task: str) -> Dict:
+        project_dir = Path(self.file_writer.output_dir)
+
+        file_blocks = []
+        for f in sorted(project_dir.rglob("*")):
+            if not f.is_file() or ".deep" in f.parts or f.name.startswith("."):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+                rel = f.relative_to(project_dir)
+                file_blocks.append(f"### archivo: {rel}\n```\n{text[:2000]}\n```")
+            except Exception:
+                pass
+
+        self._progress("ANALIZANDO")
+        prompt = (
+            f"Proyecto actual: {task}\n\n"
+            f"Archivos existentes:\n{''.join(file_blocks)}\n\n"
+            f"Cambio solicitado: {change}\n"
+            f"{self._rules_block()}\n"
+            "Devolvé SOLO los archivos modificados o nuevos con el formato:\n"
+            "### archivo: ruta/archivo.ext\n"
+            "Código completo. Sin placeholders ni '...'."
+        )
+        response = self.client.chat(
+            prompt,
+            system_prompt="Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo.",
+            temperature=0.3, max_tokens=8000,
+        )
+        if not response.get("success"):
+            return {"success": False, "files_updated": [], "error": response.get("content", "")}
+
+        self._progress("APLICANDO")
+        updated_files = []
+        for filename, code in self.file_writer._extract_named_blocks(response["content"]):
+            safe = [p for p in Path(filename).parts if p not in ("..", ".", "~")]
+            if not safe:
+                continue
+            filepath = project_dir.joinpath(*safe)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(code, encoding="utf-8")
+            updated_files.append(str(filepath))
+            self._on_file(str(filepath))
+
+        ctx_file = project_dir / ".deep" / "context.json"
+        if ctx_file.exists():
+            try:
+                ctx = json.loads(ctx_file.read_text())
+                ctx["last_update"] = change
+                ctx["updated_at"] = datetime.now().isoformat()
+                ctx_file.write_text(json.dumps(ctx, ensure_ascii=False, indent=2))
+            except Exception:
+                pass
+
+        return {"success": True, "files_updated": updated_files}
+
     def demonstrate_learning(self) -> Dict:
         if not self.memory.experiences:
             return {"status": "Sin experiencias aún"}

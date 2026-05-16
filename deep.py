@@ -67,6 +67,57 @@ def _legacy(argv: list):
 
     p_build.set_defaults(func=do_build)
 
+    # ── ask ──────────────────────────────────────────────────────────────────
+    p_ask = sub.add_parser("ask", help="Hace una pregunta sin generar proyecto")
+    p_ask.add_argument("question", nargs="+", metavar="PREGUNTA")
+    p_ask.add_argument("--model", default="deepseek-chat", metavar="MODELO")
+
+    def do_ask(args):
+        from cli.commands import run_ask
+        run_ask(" ".join(args.question), _require_api_key(), model=args.model)
+
+    p_ask.set_defaults(func=do_ask)
+
+    # ── update ───────────────────────────────────────────────────────────────
+    p_upd = sub.add_parser("update", help="Modifica el proyecto del directorio actual")
+    p_upd.add_argument("change", nargs="+", metavar="CAMBIO")
+    p_upd.add_argument("--model", default="deepseek-chat", metavar="MODELO")
+
+    def do_update(args):
+        from core.rules import load_rules
+        from cli.commands import run_update
+        run_update(" ".join(args.change), _require_api_key(), Path.cwd(),
+                   model=args.model, rules=load_rules(Path.cwd() / ".deeprules"))
+
+    p_upd.set_defaults(func=do_update)
+
+    # ── doctor ───────────────────────────────────────────────────────────────
+    p_doc = sub.add_parser("doctor", help="Verifica que todo esté configurado correctamente")
+
+    def do_doctor(args):
+        from cli.commands import run_doctor
+        run_doctor()
+
+    p_doc.set_defaults(func=do_doctor)
+
+    # ── upgrade ──────────────────────────────────────────────────────────────
+    p_upg = sub.add_parser("upgrade", help="Actualiza deep CLI desde GitHub")
+
+    def do_upgrade(args):
+        from cli.commands import run_upgrade
+        run_upgrade()
+
+    p_upg.set_defaults(func=do_upgrade)
+
+    # ── show ─────────────────────────────────────────────────────────────────
+    p_show = sub.add_parser("show", help="Muestra el contexto del proyecto actual")
+
+    def do_show(args):
+        from cli.commands import run_show
+        run_show(Path.cwd())
+
+    p_show.set_defaults(func=do_show)
+
     # ── config ───────────────────────────────────────────────────────────────
     p_cfg = sub.add_parser("config", help="Muestra o modifica la configuración")
     p_cfg_sub = p_cfg.add_subparsers(dest="config_cmd", metavar="opción")

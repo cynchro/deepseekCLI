@@ -3,6 +3,9 @@ Comandos de alto nivel — usan core para la lógica y cli.display para mostrar 
 Son la única interfaz que tanto el REPL como el modo legacy necesitan importar.
 """
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -181,6 +184,191 @@ def run_history():
         except Exception:
             pass
     show_history(experiences)
+
+
+def run_ask(question: str, api_key: str, model: str = "deepseek-chat") -> None:
+    from core.client import DeepSeekClient
+    client = DeepSeekClient(api_key, model=model)
+    spinner = Spinner()
+    print()
+    spinner.start()
+    result = client.chat(
+        question,
+        system_prompt="Sos un asistente experto en programación y tecnología. Respondé en el mismo idioma de la pregunta.",
+        temperature=0.7, max_tokens=3000,
+    )
+    spinner.stop()
+    print()
+    if result.get("success"):
+        print(result["content"])
+    else:
+        print(f"❌ {result.get('content', 'Error desconocido')}")
+    print()
+
+
+def run_update(change: str, api_key: str, project_dir: Path,
+               model: str = "deepseek-chat", rules: List[str] = None) -> None:
+    ctx_file = project_dir / ".deep" / "context.json"
+    if not ctx_file.exists():
+        print("❌ No hay proyecto en este directorio. Usá 'build' primero.")
+        return
+    try:
+        ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
+    except Exception:
+        print("❌ No se pudo leer el contexto del proyecto.")
+        return
+
+    task = ctx.get("task", "proyecto")
+    original_model = ctx.get("model", model)
+    print(f"\n🔧 Aplicando cambio: {change}")
+    print(f"📁 Proyecto: {project_dir.resolve()}")
+
+    spinner = Spinner()
+    updated_files = []
+
+    system = DeepSeekLearningSystem(
+        api_key, output_dir=str(project_dir), model=original_model,
+        root_is_output_dir=True, rules=rules or [],
+        on_progress=spinner.notify, on_file=updated_files.append,
+    )
+    print()
+    spinner.start()
+    try:
+        result = system.execute_update(change, task)
+    except KeyboardInterrupt:
+        spinner.stop()
+        print("\n⚠️  Interrumpido.")
+        return
+    except Exception as e:
+        spinner.stop()
+        print(f"\n❌ Error: {e}")
+        return
+    spinner.stop()
+
+    for path in updated_files:
+        try:
+            display = "~/" + str(Path(path).relative_to(Path.home()))
+        except ValueError:
+            display = path
+        print(f"   ✏️  {display}")
+
+    n = len(result.get("files_updated", []))
+    if result.get("success"):
+        print(f"\n✅ {n} archivo(s) actualizado(s).")
+    else:
+        print(f"\n❌ Error: {result.get('error', 'desconocido')}")
+
+
+def run_doctor() -> None:
+    print("\n  deep doctor — diagnóstico\n")
+
+    major, minor = sys.version_info.major, sys.version_info.minor
+    ok = major >= 3 and minor >= 9
+    print(f"  {'✅' if ok else '❌'} Python {major}.{minor}")
+
+    from core.config import load_api_key as _load_key
+    key = os.environ.get("DEEPSEEK_API_KEY") or _load_key()
+    print(f"  {'✅' if key else '❌'} API key {'configurada' if key else 'no encontrada  →  deep config set-key'}")
+
+    if key:
+        try:
+            data = bal.fetch(key)
+            if data and "error" not in str(data).lower():
+                print("  ✅ Conexión con DeepSeek API OK")
+            else:
+                print("  ❌ API key inválida o sin crédito")
+        except Exception as e:
+            print(f"  ❌ Sin conexión: {e}")
+
+    try:
+        import requests
+        print(f"  ✅ requests {requests.__version__}")
+    except ImportError:
+        print("  ⚠️  requests no instalado (fallback a curl)")
+
+    try:
+        import prompt_toolkit
+        print(f"  ✅ prompt_toolkit {prompt_toolkit.__version__} (REPL mejorado activo)")
+    except ImportError:
+        print("  ⚠️  prompt_toolkit no instalado (REPL básico)  →  pip install prompt_toolkit")
+
+    local_bin = str(Path.home() / ".local" / "bin")
+    in_path = local_bin in os.environ.get("PATH", "").split(":")
+    print(f"  {'✅' if in_path else '⚠️ '} ~/.local/bin {'en PATH' if in_path else 'no está en PATH'}")
+
+    venv = Path.home() / ".local" / "share" / "deepseekcli"
+    print(f"  {'✅' if venv.exists() else '⚠️ '} venv {'en' if venv.exists() else 'no encontrado en'} {venv}")
+
+    print()
+
+
+def run_upgrade() -> None:
+    venv_pip = Path.home() / ".local" / "share" / "deepseekcli" / "bin" / "pip"
+    if not venv_pip.exists():
+        print("❌ Instalación no encontrada en ~/.local/share/deepseekcli")
+        print("   Reinstalá con: bash <(curl -fsSL https://raw.githubusercontent.com/cynchro/deepseekCLI/main/install.sh)")
+        return
+    print("🔄 Actualizando deep CLI desde GitHub...")
+    result = subprocess.run(
+        [str(venv_pip), "install", "--upgrade",
+         "git+https://github.com/cynchro/deepseekCLI.git"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print("✅ deep actualizado. Abrí una nueva terminal para usar la versión nueva.")
+    else:
+        print(f"❌ Error al actualizar:\n{result.stderr[:400]}")
+
+
+def run_show(project_dir: Path) -> None:
+    ctx_file = project_dir / ".deep" / "context.json"
+    eval_file = project_dir / ".deep" / "evaluation.json"
+
+    if not ctx_file.exists():
+        print("❌ No hay proyecto en este directorio.")
+        print("   Generá uno con: deep build \"descripción\"")
+        return
+    try:
+        ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
+    except Exception:
+        print("❌ No se pudo leer el contexto del proyecto.")
+        return
+
+    print(f"\n  📁 {project_dir.resolve()}")
+    print(f"  📋 Tarea  : {ctx.get('task', '—')}")
+    print(f"  🤖 Modelo : {ctx.get('model', '—')}")
+    ts = ctx.get("timestamp", "")
+    if ts:
+        print(f"  🕐 Creado : {ts[:16].replace('T', ' ')}")
+    if ctx.get("last_update"):
+        print(f"  🔧 Update : {ctx['last_update']}")
+
+    plan = ctx.get("plan", "")
+    if plan:
+        print("\n  📐 Plan:\n")
+        for line in plan[:600].split("\n"):
+            if line.strip():
+                print(f"     {line}")
+
+    files = sorted(
+        f for f in project_dir.rglob("*")
+        if f.is_file() and ".deep" not in f.parts and not f.name.startswith(".")
+    )
+    print(f"\n  📄 Archivos ({len(files)}):")
+    for f in files:
+        print(f"     {f.relative_to(project_dir)}")
+
+    if eval_file.exists():
+        try:
+            ev = json.loads(eval_file.read_text(encoding="utf-8"))
+            success = ev.get("success", False)
+            score = ev.get("overall_score", "?")
+            print(f"\n  {'✅' if success else '❌'} Evaluación: score {score}/10")
+            for issue in ev.get("issues", [])[:3]:
+                print(f"     ⚠️  {issue}")
+        except Exception:
+            pass
+    print()
 
 
 # ── privado ───────────────────────────────────────────────────────────────────

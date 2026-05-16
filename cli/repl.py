@@ -16,7 +16,8 @@ except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
 from core.rules import load_rules
-from cli.commands import run_build, run_balance, run_history, run_fix_current
+from cli.commands import (run_build, run_balance, run_history, run_fix_current,
+                          run_ask, run_update, run_doctor, run_upgrade, run_show)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -24,14 +25,19 @@ _BANNER = """\033[1m
 ╔══════════════════════════════════════════════════╗
 ║           deep — Ecosistema DeepSeek             ║
 ╚══════════════════════════════════════════════════╝\033[0m
-  Comandos: build  fix  balance  history  help  exit
+  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  help  exit
 """
 
 _HELP = """
   build <tarea>          Genera un proyecto completo
   build <tarea> -f       Genera y corrige automáticamente si falla
   build <tarea> --model deepseek-reasoner
-  fix                    Corrige el proyecto del directorio actual
+  update <cambio>        Modifica el proyecto del directorio actual
+  ask <pregunta>         Hace una pregunta sin generar proyecto
+  fix                    Corrige errores del proyecto actual
+  show                   Muestra contexto y archivos del proyecto actual
+  doctor                 Verifica que todo esté configurado correctamente
+  upgrade                Actualiza deep CLI desde GitHub
   balance                Muestra el crédito disponible
   history                Muestra las experiencias acumuladas
   config                 Muestra la API key guardada
@@ -48,7 +54,12 @@ _STYLE = Style.from_dict({
 
 _COMPLETER = NestedCompleter.from_nested_dict({
     "build":   None,
+    "update":  None,
+    "ask":     None,
     "fix":     None,
+    "show":    None,
+    "doctor":  None,
+    "upgrade": None,
     "balance": None,
     "history": None,
     "config":  {"set-key": None},
@@ -100,6 +111,28 @@ def _handle(cmd: str, args: list, api_key: str):
 
     elif cmd == "history":
         run_history()
+
+    elif cmd == "ask":
+        if not args:
+            print("  Uso: ask <pregunta>")
+        else:
+            run_ask(" ".join(args), api_key)
+
+    elif cmd == "update":
+        if not args:
+            print("  Uso: update <descripción del cambio>")
+        else:
+            run_update(" ".join(args), api_key, Path.cwd(),
+                       rules=load_rules(Path.cwd() / ".deeprules"))
+
+    elif cmd == "show":
+        run_show(Path.cwd())
+
+    elif cmd == "doctor":
+        run_doctor()
+
+    elif cmd == "upgrade":
+        run_upgrade()
 
     elif cmd == "config":
         from core.config import prompt_and_save, show_config
