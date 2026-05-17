@@ -389,7 +389,7 @@ def run_upgrade() -> None:
         return
     print("🔄 Actualizando deep CLI desde GitHub...")
     result = subprocess.run(
-        [str(venv_pip), "install", "--upgrade",
+        [str(venv_pip), "install", "--force-reinstall", "--no-cache-dir",
          "git+https://github.com/cynchro/deepseekCLI.git"],
         capture_output=True, text=True,
     )
