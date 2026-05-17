@@ -1,4 +1,4 @@
-const CACHE = 'deep-pwa-v1';
+const CACHE = 'deep-pwa-v3';
 const STATIC = ['/', '/style.css', '/app.js', '/manifest.json'];
 
 self.addEventListener('install', e => {
@@ -16,8 +16,15 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.url.includes('/api/')) return; // nunca cachear llamadas a la API
+  if (e.request.url.includes('/api/')) return;
+  // Network-first: siempre busca contenido fresco, cachea como fallback offline
   e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
