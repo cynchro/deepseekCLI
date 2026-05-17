@@ -109,6 +109,24 @@ async def new_conversation(authorization: str | None = Header(None)):
     return {"session_id": sid}
 
 
+@app.get("/api/ls")
+async def list_dir(path: str = "", authorization: str | None = Header(None)):
+    _check_auth(authorization)
+    target = Path(path).expanduser().resolve() if path else Path.home()
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="No es un directorio")
+    dirs = []
+    try:
+        for d in sorted(target.iterdir()):
+            if d.is_dir() and not d.name.startswith('.'):
+                has_project = (d / '.deep' / 'context.json').exists()
+                dirs.append({"name": d.name, "path": str(d), "has_project": has_project})
+    except PermissionError:
+        pass
+    parent = str(target.parent) if str(target) != str(target.parent) else None
+    return {"current": str(target), "parent": parent, "dirs": dirs}
+
+
 @app.get("/api/projects")
 async def list_projects(authorization: str | None = Header(None)):
     _check_auth(authorization)

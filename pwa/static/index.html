@@ -29,7 +29,10 @@
     <header>
       <div class="header-left">
         <span class="logo">deep</span>
-        <span id="workspace-label" class="workspace-label" title="Workspace actual"></span>
+        <button id="workspace-btn" class="workspace-btn" title="Elegir directorio de trabajo">
+          <span id="workspace-label" class="workspace-label">elegir dir</span>
+          <span class="workspace-chevron">›</span>
+        </button>
       </div>
       <div class="header-actions">
         <button id="projects-btn" title="Mis proyectos">&#9776;</button>
@@ -38,18 +41,33 @@
       </div>
     </header>
 
-    <!-- Panel overlay -->
+    <!-- Panel overlay compartido -->
     <div id="panel-overlay" class="panel-overlay hidden"></div>
 
-    <!-- Panel de proyectos -->
-    <div id="projects-panel" class="projects-panel hidden">
+    <!-- Panel de proyectos (historial) -->
+    <div id="projects-panel" class="side-panel hidden">
       <div class="panel-header">
-        <span class="panel-title">Proyectos</span>
+        <span class="panel-title">Mis proyectos</span>
         <button id="close-panel-btn" class="close-panel-btn">&#10005;</button>
       </div>
-      <div id="projects-list" class="projects-list">
+      <div id="projects-list" class="panel-body">
         <p class="panel-empty">Cargando...</p>
       </div>
+    </div>
+
+    <!-- Panel explorador de directorios -->
+    <div id="dir-browser" class="side-panel hidden">
+      <div class="panel-header">
+        <div class="dir-nav">
+          <button id="dir-up-btn" class="dir-up-btn" title="Subir">↑</button>
+          <span id="dir-current" class="dir-current"></span>
+        </div>
+        <button id="close-dir-btn" class="close-panel-btn">&#10005;</button>
+      </div>
+      <div class="dir-select-bar">
+        <button id="dir-select-btn" class="dir-select-btn">&#10003; Elegir este directorio</button>
+      </div>
+      <div id="dir-list" class="panel-body"></div>
     </div>
 
     <!-- Paleta de comandos rápidos (toggle con logo) -->
@@ -62,7 +80,6 @@
         <span class="chip">📄 show</span>
         <span class="chip">📜 history</span>
         <span class="chip">💰 balance</span>
-        <span class="chip">📂 workspace</span>
       </div>
     </div>
 
@@ -77,7 +94,6 @@
           <span class="chip">📄 show</span>
           <span class="chip">📜 history</span>
           <span class="chip">💰 balance</span>
-          <span class="chip">📂 workspace</span>
         </div>
       </div>
     </div>

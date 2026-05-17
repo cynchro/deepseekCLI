@@ -15,38 +15,54 @@ const sendBtn        = document.getElementById('send-btn');
 const newChatBtn     = document.getElementById('new-chat-btn');
 const balanceBtn     = document.getElementById('balance-btn');
 const projectsBtn    = document.getElementById('projects-btn');
+const workspaceBtn   = document.getElementById('workspace-btn');
 const workspaceLabel = document.getElementById('workspace-label');
-const projectsPanel  = document.getElementById('projects-panel');
-const panelOverlay   = document.getElementById('panel-overlay');
-const closePanelBtn  = document.getElementById('close-panel-btn');
-const projectsList   = document.getElementById('projects-list');
+
+// ── Panels ────────────────────────────────────────────────────────────────────
+
+const panelOverlay  = document.getElementById('panel-overlay');
+const projectsPanel = document.getElementById('projects-panel');
+const closePanelBtn = document.getElementById('close-panel-btn');
+const projectsList  = document.getElementById('projects-list');
+
+const dirBrowser    = document.getElementById('dir-browser');
+const closeDirBtn   = document.getElementById('close-dir-btn');
+const dirUpBtn      = document.getElementById('dir-up-btn');
+const dirCurrentEl  = document.getElementById('dir-current');
+const dirList       = document.getElementById('dir-list');
+const dirSelectBtn  = document.getElementById('dir-select-btn');
+
+const logoEl        = document.querySelector('.logo');
+const cmdPalette    = document.getElementById('cmd-palette');
+
+// ── Workspace label ───────────────────────────────────────────────────────────
 
 function updateWorkspaceLabel() {
   if (workspaceLabel) {
     workspaceLabel.textContent = workspace
       ? workspace.replace(/^\/home\/\w+/, '~')
-      : '';
+      : 'elegir dir';
   }
 }
 updateWorkspaceLabel();
 
 // ── Comandos reconocidos ──────────────────────────────────────────────────────
 
-const COMMANDS = ['build', 'update', 'fix', 'show', 'history', 'balance', 'doctor', 'upgrade', 'workspace'];
+const COMMANDS = ['build', 'update', 'fix', 'show', 'history', 'balance', 'doctor', 'upgrade'];
 
 function parseCommand(text) {
   const parts = text.trim().match(/^(\w+)\s*([\s\S]*)$/);
   if (!parts) return null;
   const cmd  = parts[1].toLowerCase();
-  const args = parts[2].trim().replace(/^["']|["']$/g, ''); // quitar comillas
+  const args = parts[2].trim().replace(/^["']|["']$/g, '');
   if (COMMANDS.includes(cmd)) return { cmd, args };
   return null;
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-function authHeaders()  { return { 'Authorization': `Bearer ${password}` }; }
-function jsonHeaders()  { return { ...authHeaders(), 'Content-Type': 'application/json' }; }
+function authHeaders() { return { 'Authorization': `Bearer ${password}` }; }
+function jsonHeaders() { return { ...authHeaders(), 'Content-Type': 'application/json' }; }
 
 async function tryLogin() {
   const pwd = passInput.value.trim();
@@ -126,7 +142,6 @@ async function send() {
 
   addMessage('user', text);
   const loading = addMessage('assistant', '...', true);
-
   const parsed = parseCommand(text);
 
   try {
@@ -178,17 +193,6 @@ async function runCommand(cmd, args, loadingEl) {
   if (res.status === 401) { logout(); return; }
 
   const data = await res.json();
-
-  // Si es workspace y fue exitoso, guardar en localStorage
-  if (cmd === 'workspace' && data.output && !data.output.startsWith('❌')) {
-    const match = data.output.match(/`([^`]+)`/);
-    if (match) {
-      workspace = match[1];
-      localStorage.setItem('deep_workspace', workspace);
-      updateWorkspaceLabel();
-    }
-  }
-
   setLoading(loadingEl, data.output || '✅ Listo.');
 }
 
@@ -208,6 +212,34 @@ balanceBtn.addEventListener('click', async () => {
   await runCommand('balance', '', loading);
 });
 
+// ── Logo toggle paleta de comandos ────────────────────────────────────────────
+
+if (logoEl && cmdPalette) {
+  logoEl.addEventListener('click', () => cmdPalette.classList.toggle('hidden'));
+}
+
+// ── Chips de comandos ─────────────────────────────────────────────────────────
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const cmd = chip.textContent.replace(/^\S+\s/, '').trim();
+    const templates = {
+      'ask':     'ask ',
+      'build':   'build "',
+      'fix':     'fix',
+      'update':  'update "',
+      'show':    'show',
+      'history': 'history',
+      'balance': 'balance',
+    };
+    inputEl.value = templates[cmd] || cmd + ' ';
+    inputEl.focus();
+    inputEl.dispatchEvent(new Event('input'));
+    inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
+    if (cmdPalette) cmdPalette.classList.add('hidden');
+  });
+});
+
 // ── Input events ──────────────────────────────────────────────────────────────
 
 sendBtn.addEventListener('click', send);
@@ -224,77 +256,42 @@ inputEl.addEventListener('input', () => {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
 });
 
-// ── Hint de comandos ──────────────────────────────────────────────────────────
-// Muestra un tooltip sutil cuando el usuario empieza a escribir un comando
-
 inputEl.addEventListener('input', () => {
   const val  = inputEl.value.trim().toLowerCase();
   const hint = document.getElementById('cmd-hint');
   const map  = {
-    'build':     'build "descripción del proyecto"',
-    'update':    'update "cambio a aplicar"',
-    'fix':       'fix',
-    'show':      'show',
-    'history':   'history',
-    'balance':   'balance',
-    'doctor':    'doctor',
-    'workspace': 'workspace /ruta/del/directorio',
+    'build':   'build "descripción del proyecto"',
+    'update':  'update "cambio a aplicar"',
+    'fix':     'fix',
+    'show':    'show',
+    'history': 'history',
+    'balance': 'balance',
+    'doctor':  'doctor',
   };
   const match = Object.keys(map).find(k => val === k || val.startsWith(k + ' '));
-  if (hint) {
-    hint.textContent = match ? `💡 ${map[match]}` : '';
-  }
+  if (hint) hint.textContent = match ? `💡 ${map[match]}` : '';
 });
 
-// ── Logo toggle paleta de comandos ────────────────────────────────────────────
+// ── Panel overlay ─────────────────────────────────────────────────────────────
 
-const logoEl     = document.querySelector('.logo');
-const cmdPalette = document.getElementById('cmd-palette');
+panelOverlay.addEventListener('click', closeAllPanels);
 
-if (logoEl && cmdPalette) {
-  logoEl.addEventListener('click', () => cmdPalette.classList.toggle('hidden'));
-}
-
-// ── Chips de comandos ─────────────────────────────────────────────────────────
-
-document.querySelectorAll('.chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    const cmd = chip.textContent.replace(/^\S+\s/, '').trim(); // quitar emoji
-    const templates = {
-      'ask':       'ask ',
-      'build':     'build "',
-      'fix':       'fix',
-      'update':    'update "',
-      'show':      'show',
-      'history':   'history',
-      'balance':   'balance',
-      'workspace': 'workspace ',
-    };
-    inputEl.value = templates[cmd] || cmd + ' ';
-    inputEl.focus();
-    inputEl.dispatchEvent(new Event('input'));
-    inputEl.selectionStart = inputEl.selectionEnd = inputEl.value.length;
-    // cerrar paleta si estaba abierta
-    if (cmdPalette) cmdPalette.classList.add('hidden');
-  });
-});
-
-// ── Panel de proyectos ────────────────────────────────────────────────────────
-
-function openProjectsPanel() {
-  projectsPanel.classList.remove('hidden');
-  panelOverlay.classList.remove('hidden');
-  loadProjects();
-}
-
-function closeProjectsPanel() {
+function closeAllPanels() {
   projectsPanel.classList.add('hidden');
+  dirBrowser.classList.add('hidden');
   panelOverlay.classList.add('hidden');
 }
 
-projectsBtn.addEventListener('click', openProjectsPanel);
-closePanelBtn.addEventListener('click', closeProjectsPanel);
-panelOverlay.addEventListener('click', closeProjectsPanel);
+// ── Panel de proyectos (historial) ────────────────────────────────────────────
+
+projectsBtn.addEventListener('click', () => {
+  dirBrowser.classList.add('hidden');
+  projectsPanel.classList.remove('hidden');
+  panelOverlay.classList.remove('hidden');
+  loadProjects();
+});
+
+closePanelBtn.addEventListener('click', closeAllPanels);
 
 async function loadProjects() {
   projectsList.innerHTML = '<p class="panel-empty">Cargando...</p>';
@@ -349,17 +346,17 @@ function selectProject(p) {
   workspace = p.path;
   localStorage.setItem('deep_workspace', p.path);
   updateWorkspaceLabel();
-  closeProjectsPanel();
+  closeAllPanels();
 
   const date = fmtDate(p.updated_at || p.timestamp);
   const createdDate = fmtDate(p.timestamp);
   let msg = `**📂 ${p.name}**\n\n`;
-  msg += `**Tarea:** ${p.task}\n\n`;
+  msg += `**Tarea original:** ${p.task}\n\n`;
   if (p.last_update) msg += `**Último update:** ${p.last_update}\n\n`;
   msg += `**Archivos:** ${p.file_count}`;
   if (createdDate) msg += `  ·  **Creado:** ${createdDate}`;
-  if (p.updated_at) msg += `  ·  **Actualizado:** ${fmtDate(p.updated_at)}`;
-  msg += `\n\n---\nWorkspace listo. Podés usar \`fix\`, \`update\`, \`show\` o chatear para continuar.`;
+  if (p.updated_at) msg += `  ·  **Modificado:** ${fmtDate(p.updated_at)}`;
+  msg += `\n\n---\n**Workspace activo.** Ahora podés:\n- \`update "lo que querés cambiar"\` para modificar el proyecto\n- \`fix\` para corregir errores\n- \`show\` para ver los archivos\n- O simplemente preguntame algo sobre el proyecto`;
 
   addMessage('assistant', msg);
   inputEl.focus();
@@ -388,6 +385,76 @@ async function deleteProject(path, name, btn, card) {
   } catch {
     alert('Error de conexión.');
     btn.disabled = false;
+  }
+}
+
+// ── Explorador de directorios ─────────────────────────────────────────────────
+
+let currentBrowsePath = '';
+
+workspaceBtn.addEventListener('click', openDirBrowser);
+closeDirBtn.addEventListener('click', closeAllPanels);
+
+function openDirBrowser() {
+  projectsPanel.classList.add('hidden');
+  dirBrowser.classList.remove('hidden');
+  panelOverlay.classList.remove('hidden');
+  browseTo(workspace || '~');
+}
+
+dirUpBtn.addEventListener('click', () => {
+  if (dirUpBtn.dataset.parent) browseTo(dirUpBtn.dataset.parent);
+});
+
+dirSelectBtn.addEventListener('click', () => {
+  if (!currentBrowsePath) return;
+  workspace = currentBrowsePath;
+  localStorage.setItem('deep_workspace', workspace);
+  updateWorkspaceLabel();
+  closeAllPanels();
+  addMessage('assistant',
+    `📂 Workspace: \`${workspace}\`\n\nPodés usar \`build "descripción"\` para crear un proyecto aquí.`);
+  inputEl.focus();
+});
+
+async function browseTo(path) {
+  dirList.innerHTML = '<p class="panel-empty">Cargando...</p>';
+  try {
+    const params = path ? `?path=${encodeURIComponent(path)}` : '';
+    const res = await fetch(`/api/ls${params}`, { headers: authHeaders() });
+    if (res.status === 401) { logout(); return; }
+    const data = await res.json();
+
+    currentBrowsePath = data.current;
+    dirCurrentEl.textContent = data.current.replace(/^\/home\/\w+/, '~');
+
+    if (data.parent) {
+      dirUpBtn.dataset.parent = data.parent;
+      dirUpBtn.disabled = false;
+    } else {
+      dirUpBtn.dataset.parent = '';
+      dirUpBtn.disabled = true;
+    }
+
+    if (!data.dirs.length) {
+      dirList.innerHTML = '<p class="panel-empty">Sin subdirectorios.</p>';
+      return;
+    }
+
+    dirList.innerHTML = '';
+    for (const d of data.dirs) {
+      const item = document.createElement('div');
+      item.className = 'dir-item';
+      item.innerHTML = `
+        <span class="dir-item-icon">${d.has_project ? '📦' : '📁'}</span>
+        <span class="dir-item-name">${d.name}</span>
+        ${d.has_project ? '<span class="dir-item-badge">proyecto</span>' : ''}
+      `;
+      item.addEventListener('click', () => browseTo(d.path));
+      dirList.appendChild(item);
+    }
+  } catch (err) {
+    dirList.innerHTML = `<p class="panel-empty">Error al cargar.</p>`;
   }
 }
 
