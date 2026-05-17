@@ -274,24 +274,24 @@ inputEl.addEventListener('input', () => {
 
 // ── Panel overlay ─────────────────────────────────────────────────────────────
 
-panelOverlay.addEventListener('click', closeAllPanels);
+panelOverlay?.addEventListener('click', closeAllPanels);
 
 function closeAllPanels() {
-  projectsPanel.classList.add('hidden');
-  dirBrowser.classList.add('hidden');
-  panelOverlay.classList.add('hidden');
+  projectsPanel?.classList.add('hidden');
+  dirBrowser?.classList.add('hidden');
+  panelOverlay?.classList.add('hidden');
 }
 
 // ── Panel de proyectos (historial) ────────────────────────────────────────────
 
-projectsBtn.addEventListener('click', () => {
-  dirBrowser.classList.add('hidden');
-  projectsPanel.classList.remove('hidden');
-  panelOverlay.classList.remove('hidden');
+projectsBtn?.addEventListener('click', () => {
+  dirBrowser?.classList.add('hidden');
+  projectsPanel?.classList.remove('hidden');
+  panelOverlay?.classList.remove('hidden');
   loadProjects();
 });
 
-closePanelBtn.addEventListener('click', closeAllPanels);
+closePanelBtn?.addEventListener('click', closeAllPanels);
 
 async function loadProjects() {
   projectsList.innerHTML = '<p class="panel-empty">Cargando...</p>';
@@ -392,21 +392,21 @@ async function deleteProject(path, name, btn, card) {
 
 let currentBrowsePath = '';
 
-workspaceBtn.addEventListener('click', openDirBrowser);
-closeDirBtn.addEventListener('click', closeAllPanels);
+workspaceBtn?.addEventListener('click', openDirBrowser);
+closeDirBtn?.addEventListener('click', closeAllPanels);
 
 function openDirBrowser() {
-  projectsPanel.classList.add('hidden');
-  dirBrowser.classList.remove('hidden');
-  panelOverlay.classList.remove('hidden');
+  projectsPanel?.classList.add('hidden');
+  dirBrowser?.classList.remove('hidden');
+  panelOverlay?.classList.remove('hidden');
   browseTo(workspace || '~');
 }
 
-dirUpBtn.addEventListener('click', () => {
+dirUpBtn?.addEventListener('click', () => {
   if (dirUpBtn.dataset.parent) browseTo(dirUpBtn.dataset.parent);
 });
 
-dirSelectBtn.addEventListener('click', () => {
+dirSelectBtn?.addEventListener('click', () => {
   if (!currentBrowsePath) return;
   workspace = currentBrowsePath;
   localStorage.setItem('deep_workspace', workspace);
@@ -458,8 +458,14 @@ async function browseTo(path) {
   }
 }
 
-// ── PWA ───────────────────────────────────────────────────────────────────────
+// ── Service worker: limpiar cachés viejas ─────────────────────────────────────
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => null);
+  // Desregistrar service workers viejos que puedan estar cacheando archivos
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(reg => {
+      reg.update(); // forzar chequeo de actualización
+    });
+  });
 }
