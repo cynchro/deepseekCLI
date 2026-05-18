@@ -193,6 +193,15 @@ async function runCommand(cmd, args, loadingEl) {
   if (res.status === 401) { logout(); return; }
 
   const data = await res.json();
+
+  // Después de build, actualizar workspace al nuevo proyecto
+  if (cmd === 'build' && data.project_path) {
+    workspace = data.project_path;
+    localStorage.setItem('deep_workspace', workspace);
+    updateWorkspaceLabel();
+    log.info && console.log('workspace actualizado a:', workspace);
+  }
+
   setLoading(loadingEl, data.output || '✅ Listo.');
 }
 
