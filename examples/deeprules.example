@@ -1,0 +1,31 @@
+# Ejemplo de .deeprules
+# Copiá este archivo como .deeprules en la raíz de tu proyecto.
+# Cada línea es una regla que el modelo respeta al hacer build/update/fix.
+# Las líneas que empiezan con # son comentarios y se ignoran.
+
+# ── Stack y tecnología ────────────────────────────────────────────────────────
+
+Usar Python 3.11+. Sin soporte para versiones anteriores.
+Base de datos: PostgreSQL. Nunca SQLite en producción.
+ORM: SQLAlchemy con migraciones Alembic. No usar SQL crudo salvo queries complejas.
+API: FastAPI. No Flask ni Django.
+Autenticación: JWT con python-jose. Sin sesiones basadas en cookies.
+
+# ── Estilo de código ──────────────────────────────────────────────────────────
+
+Todo el código fuente en inglés. Comentarios en español.
+Nombres de variables y funciones en snake_case. Clases en PascalCase.
+Máximo 100 caracteres por línea.
+Sin prints de debug en el código final. Usar logging con nivel apropiado.
+
+# ── Estructura de archivos ────────────────────────────────────────────────────
+
+Separar rutas, modelos, esquemas y servicios en archivos distintos.
+Los tests van en /tests con el prefijo test_.
+Variables de entorno siempre en .env, nunca hardcodeadas.
+
+# ── Restricciones ─────────────────────────────────────────────────────────────
+
+Sin dependencias externas innecesarias. Justificar cada librería nueva.
+Sin código comentado ni TODOs sin resolver en el output final.
+Todos los endpoints de la API deben tener validación de entrada con Pydantic.

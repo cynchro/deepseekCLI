@@ -41,7 +41,19 @@ SYSTEM_PROMPT = (
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-sessions: dict = {}
+sessions: dict = {}       # {sid: [messages]}
+_session_ts: dict = {}    # {sid: last_access unix timestamp}
+SESSION_TTL = 7200        # 2 horas
+
+
+def _cleanup_sessions():
+    now = time.time()
+    expired = [sid for sid, t in _session_ts.items() if now - t > SESSION_TTL]
+    for sid in expired:
+        sessions.pop(sid, None)
+        del _session_ts[sid]
+    if expired:
+        log.debug("Sesiones expiradas: %d", len(expired))
 
 
 @app.middleware("http")
@@ -72,11 +84,15 @@ def _check_auth(authorization: str | None):
 
 
 def _get_or_create(session_id: str):
+    _cleanup_sessions()
+    now = time.time()
     if session_id and session_id in sessions:
+        _session_ts[session_id] = now
         return session_id, sessions[session_id]
     sid = str(uuid.uuid4())
     sessions[sid] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    log.debug("Nueva sesión: %s", sid)
+    _session_ts[sid] = now
+    log.debug("Nueva sesión: %s  (activas: %d)", sid, len(sessions))
     return sid, sessions[sid]
 
 
@@ -90,6 +106,7 @@ class RunRequest(BaseModel):
     command: str
     args: str = ""
     project_dir: str = ""
+    project_name: str = ""
 
 class DeleteProjectRequest(BaseModel):
     path: str
@@ -133,6 +150,7 @@ async def ask(req: MessageRequest, authorization: str | None = Header(None)):
         raw = client.chat_with_context(history, temperature=0.7, max_tokens=3000)
         content = raw["choices"][0]["message"]["content"]
         history.append({"role": "assistant", "content": content})
+        _session_ts[sid] = time.time()
         log.info("ask OK: %.0fms  resp=%d chars", (time.time()-t0)*1000, len(content))
         return {"session_id": sid, "response": content}
     except Exception as e:
@@ -228,9 +246,17 @@ async def run_command(req: RunRequest, authorization: str | None = Header(None))
     if cmd == "balance":
         try:
             data = bal.fetch(DEEPSEEK_API_KEY)
-            total    = data.get("balance", {}).get("total_balance", "?")
-            currency = data.get("balance", {}).get("currency", "USD")
-            return {"output": f"**Crédito disponible:** {total} {currency}"}
+            infos = data.get("balance_infos", [])
+            if not infos:
+                return {"output": "⚠️ No se pudo obtener el balance."}
+            lines = ["**Crédito disponible:**\n"]
+            for info in infos:
+                total    = info.get("total_balance", "?")
+                currency = info.get("currency", "USD")
+                granted  = info.get("granted_balance", 0)
+                topped   = info.get("topped_up_balance", 0)
+                lines.append(f"- **{total} {currency}** (bonificado: {granted} | recargado: {topped})")
+            return {"output": "\n".join(lines)}
         except Exception as e:
             log.error("balance error: %s", e)
             return {"output": f"❌ Error: {e}"}
@@ -266,6 +292,7 @@ async def run_command(req: RunRequest, authorization: str | None = Header(None))
             rules=load_rules(base_dir / ".deeprules"),
             on_progress=lambda m: log.info("build progress: %s", m),
             on_file=lambda f: (written_files.append(f), log.debug("build file: %s", f)),
+            project_name=req.project_name,
         )
         try:
             result = system.execute_and_learn(req.args)

@@ -14,6 +14,9 @@ dependencies = [
     "python-multipart",
 ]
 
+[project.optional-dependencies]
+https = ["trustme"]
+
 [project.scripts]
 deep = "deep:main"
 

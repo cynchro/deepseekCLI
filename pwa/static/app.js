@@ -467,14 +467,35 @@ async function browseTo(path) {
   }
 }
 
-// ── Service worker: limpiar cachés viejas ─────────────────────────────────────
+// ── Service worker ────────────────────────────────────────────────────────────
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => null);
-  // Desregistrar service workers viejos que puedan estar cacheando archivos
   navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(reg => {
-      reg.update(); // forzar chequeo de actualización
-    });
+    regs.forEach(reg => reg.update());
   });
 }
+
+// ── PWA install prompt ────────────────────────────────────────────────────────
+
+let deferredPrompt = null;
+const installBtn = document.getElementById('install-btn');
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn?.classList.remove('hidden');
+});
+
+installBtn?.addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  if (outcome === 'accepted') installBtn?.classList.add('hidden');
+});
+
+window.addEventListener('appinstalled', () => {
+  installBtn?.classList.add('hidden');
+  deferredPrompt = null;
+});

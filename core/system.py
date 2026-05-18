@@ -15,14 +15,17 @@ class DeepSeekLearningSystem:
                  model: str = "deepseek-chat", root_is_output_dir: bool = False,
                  rules: List[str] = None,
                  on_progress: Callable[[str], None] = None,
-                 on_file: Callable[[str], None] = None):
+                 on_file: Callable[[str], None] = None,
+                 reflect: bool = False,
+                 project_name: str = ""):
         self._on_progress = on_progress or (lambda msg: None)
         self._on_file = on_file or (lambda path: None)
+        self.reflect = reflect
         self.client = DeepSeekClient(api_key, model=model)
         self.memory = DeepSeekMemory(self.client)
         self.reflective_agent = ReflectiveAgent(self.client)
         self.file_writer = FileWriter(output_dir, root_is_output_dir=root_is_output_dir,
-                                      on_file=self._on_file)
+                                      on_file=self._on_file, project_name=project_name)
         self.rules = rules or []
 
     def _progress(self, msg: str):
@@ -61,20 +64,20 @@ class DeepSeekLearningSystem:
         self.memory.experiences.append(experience)
         self.memory._save_experiences()
 
-        self._progress("FASE 6")
-        reflection = self.reflective_agent.deep_reflection(
-            task=task, plan=plan, execution=str(execution), outcome=outcome, success=success
-        )
-
+        reflection = None
         metacog = None
-        if len(self.memory.experiences) % 5 == 0:
-            self._progress("FASE 7")
-            metacog = self.reflective_agent.metacognition(self.memory.experiences)
-
         patterns = []
-        if len(self.memory.experiences) % 5 == 0:
-            self._progress("FASE 8")
-            patterns = self.memory.extract_patterns(self.memory.experiences)
+        if self.reflect:
+            self._progress("FASE 6")
+            reflection = self.reflective_agent.deep_reflection(
+                task=task, plan=plan, execution=str(execution), outcome=outcome, success=success
+            )
+            if len(self.memory.experiences) % 5 == 0:
+                self._progress("FASE 7")
+                metacog = self.reflective_agent.metacognition(self.memory.experiences)
+            if len(self.memory.experiences) % 5 == 0:
+                self._progress("FASE 8")
+                patterns = self.memory.extract_patterns(self.memory.experiences)
 
         if self.file_writer.last_project_dir:
             self._persist_context(task, plan, success, outcome)
@@ -165,15 +168,19 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         project_dir = Path(self.file_writer.output_dir)
 
         file_blocks = []
-        for f in sorted(project_dir.rglob("*")):
-            if not f.is_file() or ".deep" in f.parts or f.name.startswith("."):
-                continue
+        all_files = sorted(
+            f for f in project_dir.rglob("*")
+            if f.is_file() and ".deep" not in f.parts and not f.name.startswith(".")
+        )
+        for f in all_files[:15]:
             try:
                 text = f.read_text(encoding="utf-8")
                 rel = f.relative_to(project_dir)
                 file_blocks.append(f"### archivo: {rel}\n```\n{text[:2000]}\n```")
             except Exception:
                 pass
+        if len(all_files) > 15:
+            self._progress(f"ANALIZANDO ({len(all_files)} archivos, enviando 15)")
 
         self._progress("ANALIZANDO")
         prompt = (
@@ -268,7 +275,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
     def _evaluate(self, task: str, plan: str, execution: Dict) -> Tuple[bool, str]:
         response = self.client.chat(
             f"EVALÚA esta implementación:\nTarea: {task[:200]}\nPlan: {plan[:200]}\n"
-            f"Código: {str(execution.get('code', ''))[:500]}\n\n"
+            f"Código: {str(execution.get('code', ''))[:3000]}\n\n"
             'JSON: {"overall_score":1-10,"success":true/false,"issues":[],"positives":[],"suggestions":[]}',
             system_prompt="Eres un revisor de código experto. Evalúas con criterios objetivos.",
             temperature=0.2, max_tokens=400,

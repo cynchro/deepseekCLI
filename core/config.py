@@ -1,5 +1,7 @@
 import json
 import os
+import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +28,44 @@ def save_api_key(key: str) -> None:
 
 
 def _add_to_shell(key: str) -> None:
-    """Agrega DEEPSEEK_API_KEY al archivo de perfil del shell del usuario."""
+    """Agrega DEEPSEEK_API_KEY al perfil del shell (Unix) o variables de entorno (Windows)."""
+    if platform.system() == "Windows":
+        _add_to_shell_windows(key)
+    else:
+        _add_to_shell_unix(key)
+
+
+def _add_to_shell_windows(key: str) -> None:
+    result = subprocess.run(
+        ["setx", "DEEPSEEK_API_KEY", key],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print("   ✅ Variable de entorno de usuario guardada en Windows")
+        print("      Abrí una nueva terminal para que tenga efecto")
+    else:
+        print(f"   ⚠️  No se pudo guardar con setx: {result.stderr.strip()}")
+        print(f"      Guardala manualmente: setx DEEPSEEK_API_KEY \"{key}\"")
+
+    # También intenta escribir al perfil de PowerShell si existe
+    ps_profile = Path.home() / "Documents" / "PowerShell" / "Microsoft.PowerShell_profile.ps1"
+    ps_profile_legacy = Path.home() / "Documents" / "WindowsPowerShell" / "Microsoft.PowerShell_profile.ps1"
+    for profile in (ps_profile, ps_profile_legacy):
+        if profile.exists():
+            content = profile.read_text(encoding="utf-8")
+            line = f'$env:DEEPSEEK_API_KEY = "{key}"'
+            if "DEEPSEEK_API_KEY" in content:
+                lines = content.splitlines()
+                new_lines = [line if "DEEPSEEK_API_KEY" in l else l for l in lines]
+                profile.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            else:
+                with profile.open("a", encoding="utf-8") as f:
+                    f.write(f"\n{line}\n")
+            print(f"   ✅ También agregada en {profile}")
+            break
+
+
+def _add_to_shell_unix(key: str) -> None:
     shell = Path(os.environ.get("SHELL", "")).name
     if shell == "zsh":
         candidates = [".zshrc", ".bashrc"]
@@ -42,7 +81,6 @@ def _add_to_shell(key: str) -> None:
             continue
         content = rc_file.read_text()
         if marker in content:
-            # Reemplazar la línea existente
             lines = content.splitlines()
             new_lines = [export_line if marker in l else l for l in lines]
             rc_file.write_text("\n".join(new_lines) + "\n")
@@ -53,7 +91,6 @@ def _add_to_shell(key: str) -> None:
         print(f"      Recargá la terminal con: source ~/{rc_name}")
         return
 
-    # Si no existe ningún rc, usar .bashrc y crearlo
     rc_file = Path.home() / ".bashrc"
     with rc_file.open("a") as f:
         f.write(f"\n{export_line}\n")
