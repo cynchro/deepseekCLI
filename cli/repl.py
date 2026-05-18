@@ -26,7 +26,7 @@ _BANNER = """\033[1m
 ╔══════════════════════════════════════════════════╗
 ║           deep — Ecosistema DeepSeek             ║
 ╚══════════════════════════════════════════════════╝\033[0m
-  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  help  exit
+  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit
 """
 
 _HELP = """
@@ -45,6 +45,7 @@ _HELP = """
   config                 Muestra la API key guardada
   config set-key         Guarda una nueva API key
   help                   Esta ayuda
+  reset / new            Reinicia la conversación actual
   exit / quit / Ctrl+D   Salir
 """
 
@@ -66,6 +67,8 @@ _COMPLETER = NestedCompleter.from_nested_dict({
     "balance": None,
     "history": None,
     "config":  {"set-key": None},
+    "reset":   None,
+    "new":     None,
     "help":    None,
     "exit":    None,
     "quit":    None,
@@ -119,11 +122,14 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
     elif cmd == "history":
         run_history()
 
+    elif cmd in ("reset", "new"):
+        state.clear()
+        print("  Conversación reiniciada.")
+
     elif cmd == "ask":
         if not args:
             print("  Uso: ask <pregunta>")
         else:
-            # Siempre resetea el historial — nueva conversación
             state["ask_history"] = run_ask(" ".join(args), api_key, history=None)
             state["in_conversation"] = True
 

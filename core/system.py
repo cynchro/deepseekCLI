@@ -72,7 +72,7 @@ class DeepSeekLearningSystem:
             metacog = self.reflective_agent.metacognition(self.memory.experiences)
 
         patterns = []
-        if len(self.memory.experiences) >= 3:
+        if len(self.memory.experiences) % 5 == 0:
             self._progress("FASE 8")
             patterns = self.memory.extract_patterns(self.memory.experiences)
 
@@ -101,7 +101,7 @@ class DeepSeekLearningSystem:
         for fp in code_files[:10]:
             try:
                 text = Path(fp).read_text(encoding="utf-8")
-                file_blocks.append(f"### archivo: {Path(fp).name}\n```\n{text[:1000]}\n```")
+                file_blocks.append(f"### archivo: {Path(fp).name}\n```\n{text[:3000]}\n```")
             except Exception:
                 pass
 

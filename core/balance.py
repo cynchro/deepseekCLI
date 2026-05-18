@@ -44,16 +44,3 @@ def get_ref() -> Dict:
 def save_ref(ref: Dict):
     _REF_FILE.parent.mkdir(parents=True, exist_ok=True)
     _REF_FILE.write_text(json.dumps(ref, indent=2))
-
-
-def snapshot(api_key: str) -> Dict:
-    """Retorna {currency: {total, granted, topped}} para comparar antes/después."""
-    data = fetch(api_key)
-    return {
-        info.get("currency", "?"): {
-            "total": float(info.get("total_balance", 0)),
-            "granted": float(info.get("granted_balance", 0)),
-            "topped": float(info.get("topped_up_balance", 0)),
-        }
-        for info in data.get("balance_infos", [])
-    }
