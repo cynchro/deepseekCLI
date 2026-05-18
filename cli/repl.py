@@ -16,9 +16,10 @@ except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
 from core.rules import load_rules
+import core.skills as skills_mod
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
-                          run_ask, run_update, run_doctor, run_upgrade, run_show,
-                          run_serve)
+                          run_ask, run_skill, run_update, run_doctor, run_upgrade,
+                          run_show, run_serve)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -38,6 +39,7 @@ _HELP = """
   fix                    Corrige errores del proyecto actual
   show                   Muestra contexto y archivos del proyecto actual
   serve                  Inicia el servidor web para usar deep desde el celular
+  serve --https          Activa HTTPS para instalar la app en el celular
   doctor                 Verifica que todo esté configurado correctamente
   upgrade                Actualiza deep CLI desde GitHub
   balance                Muestra el crédito disponible
@@ -55,24 +57,21 @@ _STYLE = Style.from_dict({
     "project": "#888888 italic",
 }) if _HAS_PROMPT_TOOLKIT else None
 
-_COMPLETER = NestedCompleter.from_nested_dict({
-    "build":   None,
-    "update":  None,
-    "ask":     None,
-    "fix":     None,
-    "show":    None,
-    "serve":   None,
-    "doctor":  None,
-    "upgrade": None,
-    "balance": None,
-    "history": None,
-    "config":  {"set-key": None},
-    "reset":   None,
-    "new":     None,
-    "help":    None,
-    "exit":    None,
-    "quit":    None,
-}) if _HAS_PROMPT_TOOLKIT else None
+def _build_completer(skill_names: list):
+    if not _HAS_PROMPT_TOOLKIT:
+        return None
+    base = {
+        "build":   None, "update":  None, "ask":     None,
+        "fix":     None, "show":    None, "serve":   None,
+        "doctor":  None, "upgrade": None, "balance": None,
+        "history": None, "config":  {"set-key": None},
+        "skill":   {"list": None, "new": None},
+        "reset":   None, "new":     None,
+        "help":    None, "exit":    None, "quit":    None,
+    }
+    for name in skill_names:
+        base[name] = None
+    return NestedCompleter.from_nested_dict(base)
 
 
 def _detect_project() -> str:
@@ -109,7 +108,7 @@ def _parse(line: str):
     return parts[0].lower(), parts[1:]
 
 
-def _handle(cmd: str, args: list, api_key: str, state: dict):
+def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict = None):
     if cmd in ("exit", "quit", "q"):
         return False                       # señal de salida
 
@@ -144,8 +143,10 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
         run_show(Path.cwd())
 
     elif cmd == "serve":
-        port = int(args[0]) if args and args[0].isdigit() else 8000
-        run_serve(port=port)
+        use_https = "--https" in args
+        port_args = [a for a in args if a.isdigit()]
+        port = int(port_args[0]) if port_args else 8000
+        run_serve(port=port, use_https=use_https)
 
     elif cmd == "doctor":
         run_doctor()
@@ -192,15 +193,90 @@ def _handle(cmd: str, args: list, api_key: str, state: dict):
             verbose=False, auto_fix=auto_fix,
         )
 
+    elif cmd == "skill":
+        _handle_skill_meta(args, loaded_skills or {})
+
+    elif loaded_skills and cmd in loaded_skills:
+        skill = loaded_skills[cmd]
+        if not args and not state.get("in_conversation"):
+            print(f"  Uso: {cmd} <pregunta>")
+        else:
+            full_input = " ".join(args) if args else (cmd + " " + " ".join(args)).strip()
+            if state.get("active_skill") != cmd:
+                # Cambio de skill → nueva conversación con ese system prompt
+                state["ask_history"] = None
+                state["active_skill"] = cmd
+            state["ask_history"] = run_skill(
+                skill, full_input, api_key, history=state.get("ask_history")
+            )
+            state["in_conversation"] = True
+
     elif state.get("in_conversation"):
-        # Texto libre → continúa la conversación activa
         full_input = (cmd + " " + " ".join(args)).strip()
-        state["ask_history"] = run_ask(full_input, api_key, history=state.get("ask_history"))
+        active = state.get("active_skill")
+        if active and loaded_skills and active in loaded_skills:
+            state["ask_history"] = run_skill(
+                loaded_skills[active], full_input, api_key,
+                history=state.get("ask_history"),
+            )
+        else:
+            state["ask_history"] = run_ask(full_input, api_key, history=state.get("ask_history"))
 
     else:
         print(f"  Comando desconocido: '{cmd}'. Escribí 'help'.")
 
     return True                            # continuar el loop
+
+
+def _handle_skill_meta(args: list, loaded_skills: dict):
+    sub = args[0] if args else "list"
+
+    if sub == "list":
+        if not loaded_skills:
+            print("  Sin skills instalados. Creá uno con: skill new <nombre>")
+            return
+        print(f"\n  📦 Skills disponibles ({len(loaded_skills)}):\n")
+        for name, sk in loaded_skills.items():
+            desc = sk.get("description", "")
+            print(f"     {name:<16} {desc}")
+        print()
+
+    elif sub == "new":
+        name = args[1] if len(args) > 1 else None
+        if not name:
+            try:
+                name = input("  Nombre del skill: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return
+        if not name:
+            return
+        try:
+            desc = input("  Descripción breve: ").strip()
+            print("  System prompt (terminá con una línea que solo diga FIN):")
+            lines = []
+            while True:
+                line = input()
+                if line.strip().upper() == "FIN":
+                    break
+                lines.append(line)
+            system_prompt = "\n".join(lines).strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Cancelado.")
+            return
+        if not system_prompt:
+            print("  El system prompt no puede estar vacío.")
+            return
+        try:
+            raw = input("  ¿Local al proyecto? [s/N]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            raw = "n"
+        local = raw in ("s", "si", "sí", "y", "yes")
+        path = skills_mod.create(name, desc, system_prompt, project_local=local)
+        print(f"  ✅ Skill '{name}' guardado en {path}")
+        loaded_skills.update(skills_mod.load(Path.cwd()))
+
+    else:
+        print(f"  Subcomando desconocido: skill {sub}  (list | new)")
 
 
 def run(api_key: str):
@@ -216,10 +292,11 @@ def run(api_key: str):
 
 
 def _run_rich(api_key: str):
+    loaded_skills = skills_mod.load(Path.cwd())
     session = PromptSession(
         history=FileHistory(str(_HISTORY_FILE)),
         auto_suggest=AutoSuggestFromHistory(),
-        completer=_COMPLETER,
+        completer=_build_completer(list(loaded_skills)),
         style=_STYLE,
         complete_while_typing=True,
     )
@@ -237,12 +314,13 @@ def _run_rich(api_key: str):
         cmd, args = _parse(line)
         if cmd is None:
             continue
-        if not _handle(cmd, args, api_key, state):
+        if not _handle(cmd, args, api_key, state, loaded_skills):
             print("👋 Hasta luego!")
             break
 
 
 def _run_basic(api_key: str):
+    loaded_skills = skills_mod.load(Path.cwd())
     state: dict = {}
     while True:
         try:
@@ -254,6 +332,6 @@ def _run_basic(api_key: str):
         cmd, args = _parse(line)
         if cmd is None:
             continue
-        if not _handle(cmd, args, api_key, state):
+        if not _handle(cmd, args, api_key, state, loaded_skills):
             print("👋 Hasta luego!")
             break

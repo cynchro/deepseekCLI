@@ -16,6 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+if sys.platform == "win32":
+    os.system("")  # habilita secuencias ANSI en la consola de Windows 10+
+
 
 def _require_api_key() -> str:
     key = os.getenv("DEEPSEEK_API_KEY")
@@ -48,6 +51,8 @@ def _legacy(argv: list):
     p_build = sub.add_parser("build", help="Genera un proyecto completo")
     p_build.add_argument("task", nargs="+", metavar="TAREA")
     p_build.add_argument("-o", "--output", metavar="DIR")
+    p_build.add_argument("-n", "--name", default="", metavar="NOMBRE",
+                         help="Nombre del directorio del proyecto")
     p_build.add_argument("--model", default="deepseek-chat", metavar="MODELO")
     p_build.add_argument("-f", "--auto-fix", action="store_true",
                          help="Corregir automáticamente si la evaluación falla")
@@ -63,6 +68,7 @@ def _legacy(argv: list):
             root_is_output_dir=args.output is not None,
             rules=rules, verbose=args.verbose,
             auto_fix=getattr(args, "auto_fix", False),
+            project_name=args.name,
         )
 
     p_build.set_defaults(func=do_build)
@@ -103,10 +109,12 @@ def _legacy(argv: list):
     # ── serve ────────────────────────────────────────────────────────────────
     p_srv = sub.add_parser("serve", help="Inicia el servidor web para usar deep desde el celular")
     p_srv.add_argument("--port", type=int, default=8000, metavar="PUERTO")
+    p_srv.add_argument("--https", action="store_true", dest="use_https",
+                       help="Activa HTTPS para instalar la app en el celular")
 
     def do_serve(args):
         from cli.commands import run_serve
-        run_serve(port=args.port)
+        run_serve(port=args.port, use_https=args.use_https)
 
     p_srv.set_defaults(func=do_serve)
 
