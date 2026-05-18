@@ -354,6 +354,15 @@ def run_doctor() -> None:
     print()
 
 
+def _find_free_port(start: int) -> int:
+    import socket
+    for p in range(start, start + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("localhost", p)) != 0:
+                return p
+    return start
+
+
 def run_serve(port: int = 8000, use_https: bool = False) -> None:
     import socket
     import tempfile
@@ -369,6 +378,12 @@ def run_serve(port: int = 8000, use_https: bool = False) -> None:
     if not pwa_dir.exists() or not (pwa_dir / "main.py").exists():
         print("❌ No se encontró el servidor web. Actualizá con: deep upgrade")
         return
+
+    # Verificar que el puerto esté libre
+    free = _find_free_port(port)
+    if free != port:
+        print(f"  ⚠️  Puerto {port} ocupado → usando {free}")
+        port = free
 
     # IPs disponibles
     ts_ip = None
