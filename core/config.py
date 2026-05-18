@@ -28,10 +28,10 @@ def save_api_key(key: str) -> None:
 def _add_to_shell(key: str) -> None:
     """Agrega DEEPSEEK_API_KEY al archivo de perfil del shell del usuario."""
     shell = Path(os.environ.get("SHELL", "")).name
-    candidates = [".bashrc", ".zshrc"] if shell == "zsh" else [".bashrc", ".zshrc"]
-    # Poner primero el que corresponde al shell actual
     if shell == "zsh":
         candidates = [".zshrc", ".bashrc"]
+    else:
+        candidates = [".bashrc", ".zshrc"]
 
     export_line = f'export DEEPSEEK_API_KEY="{key}"'
     marker = "DEEPSEEK_API_KEY"

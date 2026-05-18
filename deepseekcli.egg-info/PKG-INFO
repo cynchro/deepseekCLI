@@ -4,3 +4,6 @@ Version: 0.1.0
 Summary: CLI/REPL para generar proyectos con DeepSeek
 Requires-Python: >=3.9
 Requires-Dist: requests>=2.28
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: python-multipart

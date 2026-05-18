@@ -201,6 +201,10 @@ def run_ask(question: str, api_key: str, model: str = "deepseek-chat",
     ]
     messages.append({"role": "user", "content": question})
 
+    messages, compacted = client.compact_history(messages)
+    if compacted:
+        print("\n⚡ Compactando conversación…")
+
     spinner = Spinner()
     print()
     spinner.start()
@@ -456,16 +460,16 @@ def _do_fix(system: DeepSeekLearningSystem, task: str, result: dict,
             verbose: bool) -> dict:
     spinner = Spinner() if not verbose else None
     buffered_files = []
+    orig_on_file = None
+    orig_progress = None
 
     if spinner:
         orig_on_file = system._on_file
-        def on_file_capture(path):
-            buffered_files.append(path)
-        system._on_file = on_file_capture
+        orig_progress = system._on_progress
+        system._on_file = buffered_files.append
+        system._on_progress = spinner.notify
         print()
         spinner.start()
-        orig_progress = system._on_progress
-        system._on_progress = spinner.notify
 
     try:
         fix_result = system.review_and_fix(task, result)
@@ -477,9 +481,9 @@ def _do_fix(system: DeepSeekLearningSystem, task: str, result: dict,
     finally:
         if spinner:
             spinner.stop()
-            if "orig_on_file" in dir():
+            if orig_on_file is not None:
                 system._on_file = orig_on_file
-            if "orig_progress" in dir():
+            if orig_progress is not None:
                 system._on_progress = orig_progress
 
     for path in buffered_files:

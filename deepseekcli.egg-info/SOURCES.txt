@@ -21,3 +21,13 @@ deepseekcli.egg-info/dependency_links.txt
 deepseekcli.egg-info/entry_points.txt
 deepseekcli.egg-info/requires.txt
 deepseekcli.egg-info/top_level.txt
+pwa/__init__.py
+pwa/generate_icons.py
+pwa/main.py
+pwa/static/app.js
+pwa/static/icon-192.png
+pwa/static/icon-512.png
+pwa/static/index.html
+pwa/static/manifest.json
+pwa/static/style.css
+pwa/static/sw.js
