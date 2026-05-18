@@ -176,39 +176,70 @@ Muestra la tarea original, el modelo usado, el plan, los archivos generados y el
 ```bash
 deep serve              # HTTP básico
 deep serve --https      # HTTPS + instalable como app
-deep serve --https 9000 # puerto personalizado con HTTPS
+deep serve --port 9000 --https  # puerto personalizado con HTTPS
 ```
 
-Levanta una interfaz web accesible desde cualquier dispositivo en la misma red. Si tenés Tailscale instalado, muestra la URL directamente para acceso remoto.
+Levanta una interfaz web accesible desde cualquier dispositivo en la red.
+
+---
+
+#### Recomendación: usá Tailscale para conectar el celular
+
+[Tailscale](https://tailscale.com) es la forma más cómoda y segura de acceder a `deep serve` desde el celular, incluso si estás en redes distintas (datos móviles, otra WiFi, etc.).
+
+**Por qué Tailscale:**
+- Te asigna una IP fija (`100.x.x.x`) que no cambia aunque cambies de red
+- Funciona sin abrir puertos en el router
+- La URL es siempre la misma, sin tener que buscar la IP local cada vez
+- Sin Tailscale, el celular y la computadora tienen que estar en la misma WiFi
+
+**Setup (una sola vez):**
+
+1. Instalá Tailscale en la compu: [tailscale.com/download](https://tailscale.com/download)
+2. Instalá Tailscale en el celular (App Store / Play Store)
+3. Logueate con la misma cuenta en ambos
+4. Listo — la compu aparece en la red Tailscale con una IP `100.x.x.x`
+
+Con Tailscale activo, `deep serve --https` muestra directamente la URL `100.x.x.x` para usar desde el celular.
+
+---
 
 #### Instalar como app en el celular (PWA)
 
-Con `--https`, `deep` genera un certificado automáticamente y habilita la instalación como app nativa con un solo tap.
+Para que el celular pueda instalar `deep` como app nativa, la conexión tiene que ser HTTPS. `deep serve --https` genera el certificado automáticamente.
 
-**Primera vez (configuración del certificado):**
+> **Requiere `trustme`:** `pip install trustme` o `pip install "deepseekcli[https]"`
+
+**Primera vez — instalación del certificado (una sola vez por dispositivo):**
 
 ```
-deep serve --https
+$ deep serve --https
 
   🔐 HTTPS activado
 
   Paso 1 — Instalá el certificado CA en tu celular (una sola vez):
      http://100.x.x.x:8001    ← abrí esta URL en el celular
-     Android : Ajustes → Seguridad → Instalar certificado
-     iOS     : Ajustes → General → VPN y administración → Confiar
 
-  Paso 2 — Abrí la app y tocá ⬇ para instalarla:
-     https://100.x.x.x:8000
+     Android : Ajustes → Seguridad → Instalar certificado → CA certificate
+     iOS     : Abrir archivo descargado → Ajustes → General →
+               VPN y administración del dispositivo → Instalar → Confiar
+
+  Paso 2 — Abrí la app e instalala:
+     https://100.x.x.x:8000   ← abrí esta URL en el celular
 ```
 
-1. Abrí la URL del **Paso 1** en el navegador del celular → descarga el certificado CA
-2. Instalalo en los ajustes del sistema (una sola vez por dispositivo)
-3. Abrí la URL del **Paso 2** → aparece el botón **⬇** en la cabecera de la app
-4. Tap en **⬇** → la app queda instalada como si fuera nativa
+**Pasos:**
 
-A partir de ese momento, el certificado ya está instalado y no necesitás repetir el proceso. Solo `deep serve --https` y abrís la app instalada.
+1. Abrí la URL del **Paso 1** en el navegador del celular
+2. Descargá el archivo `.pem` y seguí las instrucciones según tu sistema:
+   - **Android:** Ajustes → Seguridad → Cifrado y credenciales → Instalar un certificado → Certificado de CA
+   - **iOS:** Al abrir el archivo, aparece "Perfil descargado" → Ajustes → General → VPN y administración → Instalar → Confiar en el certificado raíz
+3. Abrí la URL del **Paso 2** en el navegador — aparece el botón **⬇** en la cabecera
+4. Tap en **⬇** → la app se instala como si fuera nativa
 
-> Requiere `trustme`: `pip install trustme` o `pip install "deepseekcli[https]"`
+A partir de ese momento no necesitás repetir el proceso. Solo `deep serve --https` y abrís la app instalada directamente desde el home del celular.
+
+> **Nota:** El certificado autofirmado es local y temporal — es solo para que el navegador acepte HTTPS en tu red privada. No sale a internet.
 
 ---
 
