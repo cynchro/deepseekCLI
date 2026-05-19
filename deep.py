@@ -111,10 +111,12 @@ def _legacy(argv: list):
     p_srv.add_argument("--port", type=int, default=8000, metavar="PUERTO")
     p_srv.add_argument("--https", action="store_true", dest="use_https",
                        help="Activa HTTPS para instalar la app en el celular")
+    p_srv.add_argument("--tunnel", action="store_true", dest="use_tunnel",
+                       help="Crea un túnel HTTPS público (recomendado para instalar como PWA)")
 
     def do_serve(args):
         from cli.commands import run_serve
-        run_serve(port=args.port, use_https=args.use_https)
+        run_serve(port=args.port, use_https=args.use_https, use_tunnel=args.use_tunnel)
 
     p_srv.set_defaults(func=do_serve)
 
