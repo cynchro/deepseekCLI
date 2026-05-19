@@ -354,6 +354,29 @@ def run_doctor() -> None:
     print()
 
 
+def _print_qr(url: str) -> None:
+    try:
+        import qrcode
+    except ImportError:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "qrcode", "--quiet"],
+            capture_output=True,
+        )
+        try:
+            import qrcode
+        except ImportError:
+            return
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(url)
+    qr.make(fit=True)
+    import io as _io
+    buf = _io.StringIO()
+    qr.print_ascii(out=buf, invert=True)
+    for line in buf.getvalue().splitlines():
+        print(f"  {line}")
+    print()
+
+
 def _find_free_port(start: int) -> int:
     import socket
     for p in range(start, start + 20):
@@ -363,7 +386,7 @@ def _find_free_port(start: int) -> int:
     return start
 
 
-def run_serve(port: int = 8000, use_https: bool = False) -> None:
+def run_serve(port: int = 8000, use_https: bool = False, use_tunnel: bool = False) -> None:
     import socket
     import tempfile
     import threading
@@ -411,8 +434,15 @@ def run_serve(port: int = 8000, use_https: bool = False) -> None:
         try:
             import trustme
         except ImportError:
-            print("❌ Para HTTPS instalá: pip install trustme")
-            return
+            print("  Instalando trustme...")
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "trustme", "qrcode", "--quiet"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                print(f"❌ No se pudo instalar trustme:\n{result.stderr[:300]}")
+                return
+            import trustme
 
         tmpdir = tempfile.mkdtemp(prefix="deep-ssl-")
         ca = trustme.CA()
@@ -454,26 +484,76 @@ def run_serve(port: int = 8000, use_https: bool = False) -> None:
         threading.Thread(target=ca_server.serve_forever, daemon=True).start()
 
         display_ip = ts_ip or local_ip or "localhost"
+        ca_url   = f"http://{display_ip}:{ca_port}"
+        app_url  = f"https://{display_ip}:{port}"
+
         print(f"\n  🔐 HTTPS activado\n")
-        print(f"  Paso 1 — Instalá el certificado CA en tu celular (una sola vez):")
-        print(f"     http://{display_ip}:{ca_port}    ← abrí esta URL en el celular")
-        print(f"     Android : Ajustes → Seguridad → Instalar certificado")
-        print(f"     iOS     : Ajustes → General → VPN y administración → Confiar\n")
-        print(f"  Paso 2 — Abrí la app y tocá ⬇ para instalarla:\n")
+        print(f"  ── Paso 1: Instalá el certificado CA (una sola vez) ────────────\n")
+        print(f"  Escaneá este QR con el celular para descargar el cert:\n")
+        _print_qr(ca_url)
+        print(f"  {ca_url}\n")
+        print(f"  Android : Ajustes → Seguridad → Instalar certificado")
+        print(f"  iOS     : Ajustes → General → VPN y administración")
+        print(f"            → Instalar perfil → Confiar\n")
+        print(f"  ── Paso 2: Abrí la app ─────────────────────────────────────────\n")
+        print(f"  Escaneá este QR para abrir la app:\n")
+        _print_qr(app_url)
+        print(f"  {app_url}\n")
+        print(f"  Tocá ⬇ para instalar como app\n")
     else:
         protocol = "http"
 
     # ── URLs ──────────────────────────────────────────────────────────────────
     print(f"  🚀 Servidor deep iniciando en puerto {port}\n")
-    if ts_ip:
-        print(f"  📱 Desde tu celular (Tailscale):")
-        print(f"     {protocol}://{ts_ip}:{port}\n")
-    if local_ip:
-        print(f"  🖥️  Red local:")
-        print(f"     {protocol}://{local_ip}:{port}\n")
-    if not use_https:
-        print(f"  💡 Para instalar como app: deep serve --https\n")
+    if not use_https and not use_tunnel:
+        if ts_ip:
+            print(f"  📱 Desde tu celular (Tailscale):")
+            print(f"     http://{ts_ip}:{port}\n")
+        if local_ip:
+            print(f"  🖥️  Red local:")
+            print(f"     http://{local_ip}:{port}\n")
+        print(f"  💡 Para instalar como app: deep serve --tunnel\n")
     print("  Ctrl+C para detener\n")
+
+    # ── Tunnel ────────────────────────────────────────────────────────────────
+    tunnel_proc = None
+    if use_tunnel:
+        cf = shutil.which("cloudflared")
+        if not cf:
+            print("❌ cloudflared no encontrado.")
+            print("   Instalá desde: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/")
+            return
+
+        import re as _re
+
+        print(f"  🌐 Abriendo túnel cloudflared...\n")
+        tunnel_proc = subprocess.Popen(
+            [cf, "tunnel", "--url", f"http://localhost:{port}", "--no-autoupdate"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+        public_url = None
+        for line in tunnel_proc.stdout:
+            m = _re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
+            if m:
+                public_url = m.group(0)
+                break
+
+        if public_url:
+            print(f"  ✅ URL pública (HTTPS real):\n")
+            _print_qr(public_url)
+            print(f"  {public_url}\n")
+            print(f"  Escaneá el QR → abrís la app → tocá ⬇ para instalar\n")
+        else:
+            print("  ⚠️  No se pudo obtener la URL del túnel.")
+
+        # Drenar el stdout del tunnel en background para que no se bloquee
+        threading.Thread(
+            target=lambda: [tunnel_proc.stdout.read()],
+            daemon=True,
+        ).start()
 
     try:
         subprocess.run(
@@ -487,6 +567,9 @@ def run_serve(port: int = 8000, use_https: bool = False) -> None:
     except Exception as e:
         print(f"❌ Error al iniciar el servidor: {e}")
         print("   Instalá uvicorn con: pip install uvicorn")
+    finally:
+        if tunnel_proc:
+            tunnel_proc.terminate()
 
 
 def run_upgrade() -> None:

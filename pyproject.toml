@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-https = ["trustme"]
+https = ["trustme", "qrcode"]
 
 [project.scripts]
 deep = "deep:main"
