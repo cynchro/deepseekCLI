@@ -13,6 +13,7 @@ core/client.py
 core/config.py
 core/memory.py
 core/rules.py
+core/skills.py
 core/system.py
 core/writer.py
 deepseekcli.egg-info/PKG-INFO
