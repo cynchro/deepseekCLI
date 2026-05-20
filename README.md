@@ -1,6 +1,8 @@
 # deep
 
 <a href="https://github.com/cynchro/deepseekCLI"><img src="https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social" alt="GitHub stars"/></a>
+<a href="https://pypi.org/project/deepseek-builder/"><img src="https://img.shields.io/pypi/v/deepseek-builder" alt="PyPI version"/></a>
+<a href="https://pypi.org/project/deepseek-builder/"><img src="https://img.shields.io/pypi/dm/deepseek-builder" alt="PyPI downloads"/></a>
 
 CLI/REPL para generar proyectos completos usando la API de DeepSeek. Le das una descripción en lenguaje natural y genera los archivos, los evalúa, y aprende de cada ejecución para mejorar las siguientes.
 
