@@ -9,6 +9,8 @@ deep — CLI/REPL para generar proyectos con DeepSeek.
   deep history                  → muestra experiencias acumuladas y sale
   deep config                   → muestra la configuración actual
   deep config set-key           → guarda una nueva API key
+
+  deep --debug <comando>        → activa debug.log paso a paso en el dir actual
 """
 import os
 import sys
@@ -49,7 +51,9 @@ def _legacy(argv: list):
     p_hist.set_defaults(func=lambda a: run_history())
 
     p_build = sub.add_parser("build", help="Genera un proyecto completo")
-    p_build.add_argument("task", nargs="+", metavar="TAREA")
+    p_build.add_argument("task", nargs="*", metavar="TAREA")
+    p_build.add_argument("-t", "--task-file", metavar="ARCHIVO",
+                         help="Carga la descripción de la tarea desde un archivo de texto")
     p_build.add_argument("-o", "--output", metavar="DIR")
     p_build.add_argument("-n", "--name", default="", metavar="NOMBRE",
                          help="Nombre del directorio del proyecto")
@@ -60,10 +64,25 @@ def _legacy(argv: list):
 
     def do_build(args):
         api_key = _require_api_key()
+        if args.task_file:
+            task_path = Path(args.task_file)
+            if not task_path.exists():
+                print(f"❌ Archivo no encontrado: {task_path}")
+                return
+            task = task_path.read_text(encoding="utf-8").strip()
+            if not task:
+                print(f"❌ El archivo está vacío: {task_path}")
+                return
+            print(f"📄 Tarea cargada desde: {task_path}")
+        elif args.task:
+            task = " ".join(args.task)
+        else:
+            print("❌ Especificá una tarea o usá -t <archivo>")
+            return
         output_dir = args.output or str(Path.cwd())
         rules = load_rules(Path.cwd() / ".deeprules", Path(output_dir) / ".deeprules")
         run_build(
-            task=" ".join(args.task), api_key=api_key,
+            task=task, api_key=api_key,
             output_dir=output_dir, model=args.model,
             root_is_output_dir=args.output is not None,
             rules=rules, verbose=args.verbose,
@@ -158,6 +177,14 @@ def _legacy(argv: list):
 
 def main():
     argv = sys.argv[1:]
+
+    if "--debug" in argv:
+        argv = [a for a in argv if a != "--debug"]
+        os.environ["DEEP_DEBUG"] = "1"
+        import core.debug as _dbg
+        _dbg.init()
+        _dbg.log("INIT", f"deep  pid={os.getpid()}  args={sys.argv[1:]}")
+
     if argv:
         _legacy(argv)
     else:

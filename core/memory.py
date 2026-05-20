@@ -52,9 +52,12 @@ class DeepSeekMemory:
             temperature=0.3, max_tokens=500,
         )
         try:
-            return json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))
+            raw = response.get("content") or ""
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"```json\n?|```\n?", "", raw).strip()
+            return json.loads(raw)
         except Exception:
-            return {"lesson": response["content"][:200], "root_cause": "No determinado",
+            return {"lesson": (response.get("content") or "")[:200], "root_cause": "No determinado",
                     "pattern": "Desconocido", "generalization": "", "confidence": 0.5,
                     "related_concepts": []}
 
