@@ -95,7 +95,23 @@ def run_build(task: str, api_key: str, output_dir: str,
     show_evaluation(result)
 
     if not result.get("success"):
-        if auto_fix:
+        # Si la heurística confirmó estructura completa, el fallo del LLM puede ser falso negativo
+        try:
+            outcome_ev = json.loads(result.get("outcome", "{}"))
+            heuristic_override = outcome_ev.get("heuristic_override", False)
+        except Exception:
+            heuristic_override = False
+
+        if heuristic_override:
+            print("\n💡 Heurística: estructura completa en disco — el fallo del evaluador puede ser falso negativo.")
+            print("   Revisá el código manualmente antes de corregir.")
+            try:
+                answer = input("¿Corregir de todas formas? [s/N]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer in ("s", "si", "sí", "y", "yes"):
+                result = _do_fix(system, task, result, verbose)
+        elif auto_fix:
             result = _do_fix(system, task, result, verbose)
         else:
             try:

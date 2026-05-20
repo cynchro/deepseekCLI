@@ -1,0 +1,175 @@
+Eres un ingeniero senior especializado en sistemas de IA, RAG, procesamiento de audio y despliegue con Docker. Tu objetivo es diseñar e implementar un sistema completo que permita:
+
+- Recibir un audio como input
+- Transcribirlo a texto
+- Buscar información en documentos previamente ingestados
+- Generar una respuesta basada SOLO en esa información (sin alucinaciones)
+- Convertir la respuesta en audio
+- Devolver ese audio como output
+
+El sistema debe ser 100% funcional, eficiente y ejecutable en una máquina local sin dependencias instaladas, usando Docker.
+
+---
+
+# CONTEXTO DEL ENTORNO
+
+- CPU: Intel i7 (8 hilos)
+- RAM: 16GB
+- Sin GPU
+- Sin presupuesto
+- Solo se dispone de API key de Groq
+- NO hay Python ni librerías instaladas en el host
+- TODO debe correr dentro de Docker
+
+---
+
+# REQUISITOS DEL SISTEMA
+
+## 1. Arquitectura general
+
+Pipeline obligatorio:
+
+audio → texto → embeddings → búsqueda → contexto → LLM → texto → TTS → audio
+
+---
+
+## 2. Tecnologías obligatorias
+
+- STT: faster-whisper
+- Embeddings: sentence-transformers
+- Vector DB: FAISS
+- LLM: Groq API
+- TTS: Piper
+
+---
+
+## 3. Docker (CRÍTICO)
+
+Debes:
+
+- Crear un Dockerfile completo
+- Crear un docker-compose.yml
+- Asegurar que TODO funcione dentro del contenedor
+- No depender de nada instalado en el host excepto Docker
+
+El contenedor debe:
+
+- Instalar todas las dependencias necesarias
+- Descargar modelos necesarios (o explicar cómo montarlos)
+- Exponer un comando simple para ejecutar el flujo completo
+
+---
+
+## 4. Persistencia
+
+- El índice FAISS debe persistirse (volumen Docker)
+- Los documentos ingestados deben persistirse
+- Evitar recomputar embeddings en cada ejecución
+
+---
+
+## 5. Sistema RAG
+
+Implementar:
+
+- Ingesta de documentos (PDF/TXT)
+- Chunking (500–1000 tokens)
+- Embeddings
+- Indexación en FAISS
+
+En runtime:
+
+- Top-k retrieval (3–5)
+- Construcción de contexto
+
+---
+
+## 6. Control de alucinaciones
+
+El sistema DEBE:
+
+- Responder SOLO con el contexto
+- NO inventar información
+- Si no encuentra respuesta → responder:
+  "No tengo esa información en los documentos proporcionados"
+
+---
+
+## 7. STT
+
+- Usar faster-whisper
+- Modelo: small
+- Optimizado para CPU
+
+---
+
+## 8. TTS
+
+- Usar Piper
+- Modelo en español
+- Output en WAV
+
+---
+
+## 9. Estructura del proyecto
+
+/project
+  /stt
+  /rag
+  /tts
+  /llm
+  /data
+  /models
+  main.py
+  config.py
+  Dockerfile
+  docker-compose.yml
+
+---
+
+## 10. Comandos de uso
+
+Debes permitir algo como:
+
+docker-compose up --build
+
+y luego:
+
+docker exec -it <container> python main.py input.wav
+
+o equivalente simple.
+
+---
+
+## 11. Implementación
+
+Debes incluir:
+
+1. Explicación de arquitectura
+2. Dockerfile completo
+3. docker-compose.yml
+4. Código Python completo
+5. Instrucciones de uso paso a paso
+
+---
+
+## 12. Optimización
+
+- Minimizar uso de RAM
+- Evitar descargas repetidas
+- Cachear modelos
+- Uso eficiente de CPU
+
+---
+
+# REGLAS IMPORTANTES
+
+- NO usar pseudocódigo
+- TODO debe ser ejecutable
+- NO omitir partes críticas
+- NO asumir dependencias fuera de Docker
+- El sistema debe funcionar en una máquina limpia con solo Docker instalado
+
+---
+
+Tu objetivo es entregar un sistema completamente funcional y dockerizado listo para ejecutar.

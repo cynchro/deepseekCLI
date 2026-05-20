@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+import core.debug as _dbg
+
 
 class FileWriter:
     LANG_EXTENSIONS = {
@@ -30,18 +32,24 @@ class FileWriter:
     def write_from_response(self, content: str, task: str) -> List[str]:
         project_dir = self._make_project_dir(task)
         self.last_project_dir = project_dir
+        _dbg.log("WRITER", f"project_dir={project_dir}  response_chars={len(content)}")
         written = []
 
         named = self._extract_named_blocks(content)
+        _dbg.log("WRITER", f"named_blocks={len(named)}")
         if named:
             for filename, code in named:
+                _dbg.log("WRITER", f"  → {filename}  ({len(code)} chars)")
                 written.append(str(self._write_file(project_dir, filename, code)))
         else:
             counters = defaultdict(int)
-            for lang, code in self._extract_anonymous_blocks(content):
+            anon = self._extract_anonymous_blocks(content)
+            _dbg.log("WRITER", f"anonymous_blocks={len(anon)}  (no named blocks found)")
+            for lang, code in anon:
                 ext = self.LANG_EXTENSIONS.get(lang.lower(), lang.lower() or "txt")
                 counters[ext] += 1
                 suffix = f"_{counters[ext]}" if counters[ext] > 1 else ""
+                _dbg.log("WRITER", f"  → main{suffix}.{ext}  ({len(code)} chars)")
                 written.append(str(self._write_file(project_dir, f"main{suffix}.{ext}", code)))
 
         deep_dir = project_dir / ".deep"
@@ -98,7 +106,7 @@ class FileWriter:
             return results
         for m in re.compile(
             r"(?:#{1,4}\s*(?:archivo|file|fichero)?:?\s*|\*\*|`)"
-            r"([\w./\-]+\.\w+)(?:\*\*|`)?\s*\n+```(?:\w+)?\n(.*?)```",
+            r"([\w./\-]+(?:\.\w+)?)(?:\*\*|`)?\s*\n+```(?:\w+)?\n(.*?)```",
             re.DOTALL | re.IGNORECASE,
         ).finditer(content):
             results.append((m.group(1).strip(), m.group(2).rstrip()))
@@ -112,7 +120,9 @@ class FileWriter:
         ]
 
     def _write_file(self, project_dir: Path, filename: str, code: str) -> Path:
-        safe = [p for p in Path(filename).parts if p not in ("..", ".", "~")]
+        # Forzar path relativo: strip de '/' inicial y filtrar componentes peligrosos
+        rel = filename.lstrip("/")
+        safe = [p for p in Path(rel).parts if p not in ("..", ".", "~", "/")]
         filepath = project_dir.joinpath(*safe)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         filepath.write_text(code, encoding="utf-8")

@@ -32,6 +32,7 @@ _BANNER = """\033[1m
 
 _HELP = """
   build <tarea>          Genera un proyecto completo
+  build -t <archivo>     Carga la tarea desde un archivo de texto
   build <tarea> -f       Genera y corrige automáticamente si falla
   build <tarea> --model deepseek-reasoner
   update <cambio>        Modifica el proyecto del directorio actual
@@ -167,9 +168,11 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
     elif cmd == "build":
         if not args:
             print("  Uso: build <descripción del proyecto>")
+            print("       build -t <archivo>  (carga tarea desde archivo)")
             return True
         model = "deepseek-chat"
         auto_fix = False
+        task_file = None
         task_parts = []
         i = 0
         while i < len(args):
@@ -178,10 +181,24 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             elif args[i] == "--model" and i + 1 < len(args):
                 model = args[i + 1]
                 i += 1
+            elif args[i] in ("-t", "--task-file") and i + 1 < len(args):
+                task_file = args[i + 1]
+                i += 1
             else:
                 task_parts.append(args[i])
             i += 1
-        task = " ".join(task_parts)
+        if task_file:
+            tf = Path(task_file)
+            if not tf.exists():
+                print(f"  ❌ Archivo no encontrado: {tf}")
+                return True
+            task = tf.read_text(encoding="utf-8").strip()
+            if not task:
+                print(f"  ❌ El archivo está vacío: {tf}")
+                return True
+            print(f"  📄 Tarea cargada desde: {tf}")
+        else:
+            task = " ".join(task_parts)
         if not task:
             print("  Uso: build <descripción del proyecto>")
             return True

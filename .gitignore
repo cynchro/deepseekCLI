@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
+
+# Entorno virtual
+.venv/
+venv/
+env/
+.env
+
+# API keys y configuración sensible
+.env.local
+.env.*.local
+
+# Logs
+debug.log
+*.log
+
+# Proyectos generados por deep (directorios con timestamp)
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*/
+
+# Índice RAG local
+.rag/
+
+# Caché de modelos descargados
+models/
+*.onnx
+*.bin
+
+# Claude Code
+.claude/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*.DS_Store
+
+# Certificados autofirmados (generados por deep serve --https)
+*.pem
+*.key
+*.crt

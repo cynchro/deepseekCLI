@@ -1,6 +1,10 @@
 # deep
 
+[![GitHub stars](https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social)](https://github.com/cynchro/deepseekCLI)
+
 CLI/REPL para generar proyectos completos usando la API de DeepSeek. Le das una descripción en lenguaje natural y genera los archivos, los evalúa, y aprende de cada ejecución para mejorar las siguientes.
+
+Hecho con ❤️ por [Cynchro Labs](https://www.cynchrolabs.com.ar)
 
 ## Instalación
 
@@ -89,9 +93,23 @@ deep doctor
 
 ```bash
 deep build "descripción del proyecto"
+deep build -t tarea.txt                          # carga la descripción desde un archivo
 deep build "app Flask con SQLite" -f              # corrige automáticamente si falla
 deep build "landing page en HTML/CSS" -o ~/dir   # especifica directorio de salida
 deep build "compilador de expresiones" --model deepseek-reasoner
+```
+
+También podés combinar `-t` con otras opciones:
+
+```bash
+deep build -t tarea.txt -f --model deepseek-reasoner -o ~/proyectos
+```
+
+El archivo puede ser cualquier `.txt` con la descripción en lenguaje natural. En el REPL:
+
+```
+deep ❯ build -t /ruta/mi_tarea.txt
+deep ❯ build -t tarea.txt -f
 ```
 
 Cada `build` ejecuta 5 fases:
@@ -274,6 +292,147 @@ deep config set-key     # guarda una nueva API key
 
 ---
 
+## Debug
+
+El flag `--debug` activa un log detallado de todo lo que hace `deep` durante una ejecución: prompts enviados, respuestas del modelo, tokens usados, latencias, archivos escritos y cada fase del pipeline. Se guarda en `debug.log` en el directorio donde corras el comando.
+
+### Activación
+
+`--debug` va siempre **antes** del subcomando:
+
+```bash
+deep --debug build "mi tarea"
+deep --debug build -t tarea.txt
+deep --debug build -t tarea.txt -f --model deepseek-reasoner
+deep --debug ask "cómo funciona Redis?"
+deep --debug update "agregá tests"
+deep --debug fix
+```
+
+También podés activarlo con una variable de entorno (útil para scripts):
+
+```bash
+DEEP_DEBUG=1 deep build -t tarea.txt
+```
+
+### Debug con archivo de tarea
+
+La combinación más común para analizar un build completo:
+
+```bash
+# 1. Escribís la tarea en un .txt (sin límite de largo)
+cat tarea.txt
+
+# 2. Corrés con debug
+deep --debug build -t tarea.txt
+
+# 3. Analizás el log mientras corre o al terminar
+tail -f debug.log          # seguir en tiempo real
+cat debug.log              # ver todo al terminar
+grep '\[API_OK\]' debug.log        # solo latencias y tokens
+grep '\[PHASE\]' debug.log         # solo transiciones de fase
+grep '\[WRITER\]' debug.log        # solo archivos escritos
+grep '\[EVAL\]' debug.log          # solo el resultado de evaluación
+```
+
+Podés combinar todos los flags normales con `--debug`:
+
+```bash
+deep --debug build -t tarea.txt -f -o ~/proyectos --model deepseek-reasoner
+```
+
+### Estructura del log
+
+Cada línea tiene el formato:
+
+```
+[HH:MM:SS.mmm  + elapsed] [TAG             ] mensaje
+```
+
+- `HH:MM:SS.mmm` — hora del evento con milisegundos
+- `+elapsed` — segundos desde que arrancó la sesión (para medir duración de cada paso)
+- `TAG` — identificador de la sección (ver tabla abajo)
+
+Los bloques de texto largo (prompts, respuestas) se muestran indentados:
+
+```
+[07:32:11.450  +   0.00s] [API_CALL        ] model=deepseek-chat  temp=0.5  max_tokens=1000
+[07:32:11.451  +   0.01s] [API_SYS         ] ── system_prompt ──────────────────────────────
+  Eres un arquitecto de software senior. Creas planes claros y accionables.
+  ────────────────────────────────────────────────────────────
+[07:32:11.452  +   0.02s] [API_USER        ] ── user_prompt ──────────────────────────────
+  Crea un plan detallado para:
+  API REST en FastAPI con JWT y PostgreSQL
+  ...
+  ────────────────────────────────────────────────────────────
+[07:32:13.210  +   1.76s] [API_OK          ] attempt=1  latency=1.76s  tokens_in=320  tokens_out=580  total=900
+[07:32:13.211  +   1.77s] [API_RESP        ] ── response_content ──────────────────────────────
+  ## Plan
+  1. Estructura de carpetas: app/, tests/, ...
+  ...
+  ────────────────────────────────────────────────────────────
+```
+
+### Tags del log
+
+| Tag | Qué registra |
+|-----|-------------|
+| `INIT` | Comando completo con el que arrancó `deep` |
+| `PHASE` | Transición de fase (1 planificación → 5 aprendizaje) |
+| `API_CALL` | Antes de cada llamada: modelo, temperatura, max_tokens |
+| `API_SYS` | System prompt completo enviado al modelo |
+| `API_USER` | User prompt completo enviado al modelo |
+| `API_OK` | Resultado: intento, latencia, tokens in/out/total |
+| `API_RESP` | Respuesta completa del modelo |
+| `API_ERR` | Error en un intento (incluye reintentos automáticos) |
+| `PLAN` | Experiencias similares encontradas antes de planificar |
+| `PHASE_1` | Plan generado por el modelo |
+| `PHASE_2` | Tokens usados en la generación de código |
+| `PHASE_3` | Archivos escritos en disco |
+| `PHASE_4` | Resultado de la evaluación |
+| `PHASE_5` | Análisis de experiencia guardado en memoria |
+| `PHASE_6` | Reflexión profunda (si `reflect=True`) |
+| `EVAL` | JSON de evaluación parseado (score, issues, positives) |
+| `WRITER` | Directorio del proyecto, bloques detectados, cada archivo |
+| `EXEC` | Tokens usados en la fase de ejecución |
+| `FIX` | Flujo de corrección automática (`fix`, `build -f`) |
+| `UPDATE` | Flujo de modificación de proyecto existente |
+| `SYSTEM` | Resumen final del ciclo completo |
+
+### Queries útiles para analizar el log
+
+```bash
+# Cuántas llamadas a la API y tokens totales
+grep 'API_OK' debug.log
+
+# Ver solo los archivos que se escribieron
+grep '→' debug.log
+
+# Ver si hubo errores o reintentos
+grep 'API_ERR' debug.log
+
+# Ver el resultado de la evaluación
+grep -A 20 '\[EVAL\]' debug.log
+
+# Medir cuánto tardó cada fase
+grep -E '\[PHASE\]|\[PHASE_[1-8]\]' debug.log
+
+# Ver si el modelo encontró experiencias previas similares
+grep '\[PLAN\]' debug.log
+
+# Seguir el log en tiempo real mientras corre el build
+tail -f debug.log
+```
+
+### Notas
+
+- El log se **agrega** al final del archivo (no sobreescribe). Cada sesión empieza con una línea `SESSION ...` para distinguirlas.
+- Para empezar limpio antes de un debug: `rm debug.log`
+- El archivo puede crecer rápido si los prompts/respuestas son largos. Un `build` típico genera entre 200 y 500 líneas.
+- Para compartir el log o analizarlo después: el archivo es texto plano, se puede abrir con cualquier editor.
+
+---
+
 ## Reglas personalizadas (.deeprules)
 
 Podés definir restricciones que DeepSeek debe respetar en cada `build`, `update` y `fix`. Creá un archivo `.deeprules` en la raíz de tu proyecto:
@@ -401,3 +560,35 @@ Sin `prompt_toolkit` el REPL funciona igual pero en modo básico (sin autocomple
 | Windows 10+ (Windows Terminal) | ✅ Completo |
 | Windows (cmd.exe) | ⚠️ Funcional, sin colores |
 | WSL | ✅ Completo |
+
+---
+
+## Philosophy
+
+See [PHILOSOPHY.md](PHILOSOPHY.md).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Code of Conduct
+
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+---
+
+## Contact
+
+**alexissaucedo@gmail.com** · [cynchrolabs.com.ar](https://www.cynchrolabs.com.ar)
+
+## Buy me a coffee?
+
+If `deep` saved you time, consider a donation — it helps keep the project going.
+
+[![Donate](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=YX332RT7KSJ4Q)
+
+---
+
+⭐ If you like this project, give it a star!
+
+[![GitHub stars](https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social)](https://github.com/cynchro/deepseekCLI)

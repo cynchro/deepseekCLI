@@ -5,6 +5,8 @@ import time
 from datetime import datetime
 from typing import Dict, List
 
+import core.debug as _dbg
+
 try:
     import requests as _requests
     _HAS_REQUESTS = True
@@ -21,32 +23,51 @@ class DeepSeekClient:
         self.call_history = []
 
     def chat(self, prompt: str, system_prompt: str = None,
-             temperature: float = 0.7, max_tokens: int = 2000) -> Dict:
+             temperature: float = 0.7, max_tokens: int = 2000,
+             model_override: str = None) -> Dict:
+        model = model_override or self.model
+        _dbg.log("API_CALL", f"model={model}  temp={temperature}  max_tokens={max_tokens}")
+        if system_prompt:
+            _dbg.log_block("API_SYS", "system_prompt", system_prompt)
+        _dbg.log_block("API_USER", "user_prompt", prompt)
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
         for attempt in range(self.max_retries):
+            t0 = time.time()
             try:
                 response = self._call_api(payload)
+                latency = time.time() - t0
+                usage = response.get("usage", {})
+                msg = response["choices"][0]["message"]
+                content = msg.get("content") or msg.get("reasoning_content", "")
+                _dbg.log("API_OK", f"attempt={attempt+1}  latency={latency:.2f}s  "
+                         f"tokens_in={usage.get('prompt_tokens','?')}  "
+                         f"tokens_out={usage.get('completion_tokens','?')}  "
+                         f"total={usage.get('total_tokens','?')}")
+                _dbg.log_block("API_RESP", "response_content", content)
                 self.call_history.append({
                     "timestamp": datetime.now().isoformat(),
-                    "tokens_used": response.get("usage", {}).get("total_tokens", 0),
+                    "tokens_used": usage.get("total_tokens", 0),
                     "success": True,
                 })
                 return {
                     "success": True,
-                    "content": response["choices"][0]["message"]["content"],
-                    "tokens": response.get("usage", {}),
+                    "content": content,
+                    "tokens": usage,
                     "model": self.model,
                 }
             except Exception as e:
+                latency = time.time() - t0
+                _dbg.log("API_ERR", f"attempt={attempt+1}  latency={latency:.2f}s  error={e}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay * (attempt + 1))
                 else:
@@ -65,17 +86,18 @@ class DeepSeekClient:
                 headers={"Authorization": f"Bearer {self.api_key}",
                          "Content-Type": "application/json"},
                 json=payload,
-                timeout=30,
+                timeout=(10, 120),
             )
             r.raise_for_status()
             return r.json()
         result = subprocess.run(
-            ["curl", "-s", "-X", "POST",
+            ["curl", "-s", "--max-time", "120", "-X", "POST",
              "https://api.deepseek.com/v1/chat/completions",
              "-H", f"Authorization: Bearer {self.api_key}",
              "-H", "Content-Type: application/json",
              "-d", json.dumps(payload)],
             capture_output=True, text=True,
+            timeout=125,
         )
         if result.returncode != 0:
             raise RuntimeError(f"curl falló: {result.stderr[:200]}")
