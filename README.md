@@ -8,6 +8,12 @@ Hecho con ❤️ por [Cynchro Labs](https://www.cynchrolabs.com.ar)
 
 ## Instalación
 
+### PyPI
+
+```bash
+pip install deepseek-builder
+```
+
 ### Linux / macOS
 
 ```bash
@@ -226,7 +232,7 @@ Con Tailscale activo, `deep serve --https` muestra directamente la URL `100.x.x.
 
 Para que el celular pueda instalar `deep` como app nativa, la conexión tiene que ser HTTPS. `deep serve --https` genera el certificado automáticamente.
 
-> **Requiere `trustme`:** `pip install trustme` o `pip install "deepseekcli[https]"`
+> **Requiere `trustme`:** `pip install trustme` o `pip install "deepseek-builder[https]"`
 
 **Primera vez — instalación del certificado (una sola vez por dispositivo):**
 
@@ -544,7 +550,7 @@ Los comandos `fix`, `update` y `show` usan ese contexto automáticamente.
 ```bash
 pip install prompt_toolkit          # autocompletado e historial en el REPL
 pip install trustme                 # HTTPS para instalar la app en el celular
-pip install "deepseekcli[https]"    # instala trustme junto con el paquete
+pip install "deepseek-builder[https]"    # instala trustme junto con el paquete
 ```
 
 Sin `prompt_toolkit` el REPL funciona igual pero en modo básico (sin autocompletado). Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación.
