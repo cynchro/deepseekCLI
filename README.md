@@ -1,6 +1,6 @@
 # deep
 
-[![GitHub stars](https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social)](https://github.com/cynchro/deepseekCLI)
+<a href="https://github.com/cynchro/deepseekCLI"><img src="https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social" alt="GitHub stars"/></a>
 
 CLI/REPL para generar proyectos completos usando la API de DeepSeek. Le das una descripción en lenguaje natural y genera los archivos, los evalúa, y aprende de cada ejecución para mejorar las siguientes.
 
@@ -585,10 +585,14 @@ See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 If `deep` saved you time, consider a donation — it helps keep the project going.
 
-[![Donate](https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=YX332RT7KSJ4Q)
+<a href="https://www.paypal.com/donate/?hosted_button_id=YX332RT7KSJ4Q">
+  <img src="https://img.shields.io/badge/PayPal-Donate-blue?logo=paypal" alt="Donate with PayPal"/>
+</a>
 
 ---
 
 ⭐ If you like this project, give it a star!
 
-[![GitHub stars](https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social)](https://github.com/cynchro/deepseekCLI)
+<a href="https://github.com/cynchro/deepseekCLI">
+  <img src="https://img.shields.io/github/stars/cynchro/deepseekCLI?style=social" alt="GitHub stars"/>
+</a>
