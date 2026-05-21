@@ -178,6 +178,9 @@ def _legacy(argv: list):
 def main():
     argv = sys.argv[1:]
 
+    from core.updater import start as _start_update_check
+    _update = _start_update_check()
+
     if "--debug" in argv:
         argv = [a for a in argv if a != "--debug"]
         os.environ["DEEP_DEBUG"] = "1"
@@ -187,9 +190,12 @@ def main():
 
     if argv:
         _legacy(argv)
+        notice = _update.get(timeout=0.3)
+        if notice:
+            print(notice)
     else:
         from cli.repl import run
-        run(_require_api_key())
+        run(_require_api_key(), update_notice=_update.get(timeout=1.5))
 
 
 if __name__ == "__main__":

@@ -296,8 +296,10 @@ def _handle_skill_meta(args: list, loaded_skills: dict):
         print(f"  Subcomando desconocido: skill {sub}  (list | new)")
 
 
-def run(api_key: str):
+def run(api_key: str, update_notice: str | None = None):
     print(_BANNER)
+    if update_notice:
+        print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     if _HAS_PROMPT_TOOLKIT:
