@@ -5,6 +5,11 @@ import sys
 from pathlib import Path
 
 try:
+    import readline  # noqa: F401 — activa historial y edición de línea en input()
+except ImportError:
+    pass
+
+try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
     from prompt_toolkit.completion import NestedCompleter
