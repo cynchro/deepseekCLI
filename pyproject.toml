@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepseek-builder"
-version = "0.1.1"
+version = "0.1.2"
 description = "CLI/REPL to generate complete projects using the DeepSeek API"
 readme = "README.md"
 license = {text = "MIT"}
@@ -28,14 +28,13 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.28",
-    "fastapi",
-    "uvicorn[standard]",
-    "python-multipart",
     "prompt_toolkit",
 ]
 
 [project.optional-dependencies]
+serve = ["fastapi", "uvicorn[standard]", "python-multipart"]
 https = ["trustme", "qrcode"]
+all = ["fastapi", "uvicorn[standard]", "python-multipart", "trustme", "qrcode"]
 
 [project.urls]
 Homepage = "https://github.com/cynchro/deepseekCLI"

@@ -409,6 +409,14 @@ def run_serve(port: int = 8000, use_https: bool = False, use_tunnel: bool = Fals
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        print('❌ El servidor web requiere dependencias adicionales.')
+        print('   Instalá con: pip install "deepseek-builder[serve]"')
+        print('   O manualmente: pip install fastapi "uvicorn[standard]" python-multipart')
+        return
+
+    try:
         import pwa as _pwa_pkg
         pwa_dir = Path(_pwa_pkg.__file__).parent
     except ImportError:
@@ -582,7 +590,6 @@ def run_serve(port: int = 8000, use_https: bool = False, use_tunnel: bool = Fals
         print("\n  Servidor detenido.")
     except Exception as e:
         print(f"❌ Error al iniciar el servidor: {e}")
-        print("   Instalá uvicorn con: pip install uvicorn")
     finally:
         if tunnel_proc:
             tunnel_proc.terminate()
