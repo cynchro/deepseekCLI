@@ -28,12 +28,26 @@ from cli.commands import (run_build, run_balance, run_history, run_fix_current,
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
-_BANNER = """\033[1m
-╔══════════════════════════════════════════════════╗
-║           deep — Ecosistema DeepSeek             ║
-╚══════════════════════════════════════════════════╝\033[0m
-  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit
-"""
+def _banner() -> str:
+    try:
+        from importlib.metadata import version
+        ver = version("deepseek-builder")
+    except Exception:
+        try:
+            import re
+            pyproject = Path(__file__).parent.parent / "pyproject.toml"
+            m = re.search(r'^version\s*=\s*"([^"]+)"', pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+            ver = m.group(1) if m else "?"
+        except Exception:
+            ver = "?"
+    return (
+        "\033[1m\n"
+        "╔══════════════════════════════════════════════════╗\n"
+        "║           deep — Ecosistema DeepSeek             ║\n"
+        f"║                    v{ver:<28}║\n"
+        "╚══════════════════════════════════════════════════╝\033[0m\n"
+        "  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
+    )
 
 _HELP = """
   build <tarea>          Genera un proyecto completo
@@ -50,8 +64,9 @@ _HELP = """
   upgrade                Actualiza deep CLI desde GitHub
   balance                Muestra el crédito disponible
   history                Muestra las experiencias acumuladas
-  config                 Muestra la API key guardada
+  config                 Muestra la configuración guardada
   config set-key         Guarda una nueva API key
+  config set-lang        Cambia el idioma de las respuestas
   help                   Esta ayuda
   reset / new            Reinicia la conversación actual
   exit / quit / Ctrl+D   Salir
@@ -70,7 +85,7 @@ def _build_completer(skill_names: list):
         "build":   None, "update":  None, "ask":     None,
         "fix":     None, "show":    None, "serve":   None,
         "doctor":  None, "upgrade": None, "balance": None,
-        "history": None, "config":  {"set-key": None},
+        "history": None, "config":  {"set-key": None, "set-lang": None},
         "skill":   {"list": None, "new": None},
         "reset":   None, "new":     None,
         "help":    None, "exit":    None, "quit":    None,
@@ -161,9 +176,11 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         run_upgrade()
 
     elif cmd == "config":
-        from core.config import prompt_and_save, show_config
+        from core.config import prompt_and_save, prompt_and_save_language, show_config
         if args and args[0] == "set-key":
             prompt_and_save()
+        elif args and args[0] == "set-lang":
+            prompt_and_save_language()
         else:
             show_config()
 
@@ -302,10 +319,14 @@ def _handle_skill_meta(args: list, loaded_skills: dict):
 
 
 def run(api_key: str, update_notice: str | None = None):
-    print(_BANNER)
+    print(_banner())
     if update_notice:
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    from core.config import load_language, prompt_and_save_language
+    if load_language() is None:
+        prompt_and_save_language()
 
     if _HAS_PROMPT_TOOLKIT:
         _run_rich(api_key)

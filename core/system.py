@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import core.debug as _dbg
 from core.client import DeepSeekClient
+from core.config import get_language_instruction
 from core.memory import DeepSeekMemory
 from core.agent import ReflectiveAgent
 from core.writer import FileWriter
@@ -160,10 +161,11 @@ Archivos actuales:
 Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ext
 """
         _dbg.log("FIX", f"code_files={len(code_files)}  issues={issues}  suggestions={suggestions}")
+        lang = get_language_instruction()
         self._progress("REVISIÓN")
         response = self.client.chat(
             prompt,
-            system_prompt="Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders.",
+            system_prompt=f"Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders. {lang}",
             temperature=0.2, max_tokens=8000,
         )
         if not response.get("success"):
@@ -224,6 +226,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         if len(all_files) > 15:
             self._progress(f"ANALIZANDO ({len(all_files)} archivos, enviando 15)")
 
+        lang = get_language_instruction()
         self._progress("ANALIZANDO")
         prompt = (
             f"Proyecto actual: {task}\n\n"
@@ -236,7 +239,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         response = self.client.chat(
             prompt,
-            system_prompt="Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo.",
+            system_prompt=f"Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo. {lang}",
             temperature=0.3, max_tokens=8000,
         )
         if not response.get("success"):
@@ -296,21 +299,23 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 for e in similar[:3]
             )
             _dbg.log_block("PLAN", "similar_context", context)
+        lang = get_language_instruction()
         response = self.client.chat(
             f"Crea un plan detallado para:\n{task}\n{context}\n{self._rules_block()}\n"
             "Incluye: arquitectura, archivos a crear (rutas relativas), dependencias, posibles problemas.",
-            system_prompt="Eres un arquitecto de software senior. Creas planes claros y accionables.",
+            system_prompt=f"Eres un arquitecto de software senior. Creas planes claros y accionables. {lang}",
             temperature=0.5, max_tokens=10000,
         )
         return response["content"]
 
     def _execute(self, task: str, plan: str) -> Dict:
+        lang = get_language_instruction()
         response = self.client.chat(
             f"IMPLEMENTA este plan generando TODOS los archivos.\n\nTarea: {task}\nPlan:\n{plan}\n"
             f"{self._rules_block()}\n"
             "FORMATO: antes de cada bloque escribe ### archivo: ruta/archivo.ext\n"
             "Código completo y funcional. Sin '...' ni placeholders.",
-            system_prompt="Eres un desarrollador senior. Código limpio, completo. Siempre indicás el nombre del archivo.",
+            system_prompt=f"Eres un desarrollador senior. Código limpio, completo. Siempre indicás el nombre del archivo. {lang}",
             temperature=0.3, max_tokens=12000,
         )
         tokens = response.get("tokens", {}).get("total_tokens", 0)
