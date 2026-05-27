@@ -161,11 +161,15 @@ def _legacy(argv: list):
     p_cfg = sub.add_parser("config", help="Muestra o modifica la configuración")
     p_cfg_sub = p_cfg.add_subparsers(dest="config_cmd", metavar="opción")
     p_cfg_sub.add_parser("set-key", help="Guarda una nueva API key")
+    p_cfg_sub.add_parser("set-lang", help="Cambia el idioma de las respuestas")
 
     def do_config(args):
-        from core.config import prompt_and_save, show_config
-        if getattr(args, "config_cmd", None) == "set-key":
+        from core.config import prompt_and_save, prompt_and_save_language, show_config
+        cfg_cmd = getattr(args, "config_cmd", None)
+        if cfg_cmd == "set-key":
             prompt_and_save()
+        elif cfg_cmd == "set-lang":
+            prompt_and_save_language()
         else:
             show_config()
 

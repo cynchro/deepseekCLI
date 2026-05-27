@@ -221,11 +221,12 @@ def run_ask(question: str, api_key: str, model: str = "deepseek-chat",
     """Envía una pregunta manteniendo el historial de la conversación.
     Devuelve el historial actualizado para pasarlo en la próxima llamada."""
     from core.client import DeepSeekClient
+    from core.config import get_language_instruction
     client = DeepSeekClient(api_key, model=model)
 
+    lang = get_language_instruction()
     default_system = system_prompt or (
-        "Sos un asistente experto en programación y tecnología. "
-        "Respondé en el mismo idioma de la pregunta."
+        f"Sos un asistente experto en programación y tecnología. {lang}"
     )
     messages = list(history) if history else [
         {"role": "system", "content": default_system}
