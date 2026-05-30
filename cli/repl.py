@@ -28,6 +28,42 @@ from cli.commands import (run_build, run_balance, run_history, run_fix_current,
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
+
+def _chat_history_path() -> Path:
+    deep_dir = Path.cwd() / ".deep"
+    if deep_dir.exists():
+        return deep_dir / "chat_history.json"
+    return Path.home() / ".config" / "deep" / "chat_history.json"
+
+
+def _load_chat_history() -> dict:
+    path = _chat_history_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_chat_history(state: dict) -> None:
+    path = _chat_history_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "messages": state.get("ask_history") or [],
+            "active_skill": state.get("active_skill"),
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_chat_history() -> None:
+    path = _chat_history_path()
+    if path.exists():
+        path.unlink()
+
+
 def _banner() -> str:
     try:
         from importlib.metadata import version
@@ -143,6 +179,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         run_history()
 
     elif cmd in ("reset", "new"):
+        _clear_chat_history()
         state.clear()
         print("  Conversación reiniciada.")
 
@@ -152,6 +189,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         else:
             state["ask_history"] = run_ask(" ".join(args), api_key, history=None)
             state["in_conversation"] = True
+            _save_chat_history(state)
 
     elif cmd == "update":
         if not args:
@@ -249,6 +287,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
                 skill, full_input, api_key, history=state.get("ask_history")
             )
             state["in_conversation"] = True
+            _save_chat_history(state)
 
     elif state.get("in_conversation"):
         full_input = (cmd + " " + " ".join(args)).strip()
@@ -260,6 +299,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             )
         else:
             state["ask_history"] = run_ask(full_input, api_key, history=state.get("ask_history"))
+        _save_chat_history(state)
 
     else:
         print(f"  Comando desconocido: '{cmd}'. Escribí 'help'.")
@@ -346,6 +386,14 @@ def _run_rich(api_key: str):
         complete_while_typing=True,
     )
     state: dict = {}
+    saved = _load_chat_history()
+    if saved.get("messages"):
+        state["ask_history"] = saved["messages"]
+        state["in_conversation"] = True
+        if saved.get("active_skill"):
+            state["active_skill"] = saved["active_skill"]
+        n = sum(1 for m in saved["messages"] if m.get("role") == "user")
+        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
     while True:
         try:
             project = _detect_project()
@@ -367,6 +415,14 @@ def _run_rich(api_key: str):
 def _run_basic(api_key: str):
     loaded_skills = skills_mod.load(Path.cwd())
     state: dict = {}
+    saved = _load_chat_history()
+    if saved.get("messages"):
+        state["ask_history"] = saved["messages"]
+        state["in_conversation"] = True
+        if saved.get("active_skill"):
+            state["active_skill"] = saved["active_skill"]
+        n = sum(1 for m in saved["messages"] if m.get("role") == "user")
+        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
     while True:
         try:
             project = _detect_project()
