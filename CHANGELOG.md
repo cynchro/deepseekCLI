@@ -12,9 +12,10 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   planifica y DeepSeek construye y corrige. Un solo archivo fuente (`.deep/job.md`)
   con secciones `PLAN`/`RULES`/`TASKS`; DeepSeek construye módulo por módulo usando
   el plan de Claude y se saltea su propia fase de planificación. Subcomandos:
-  `--init` (plantilla), `--review` (vuelca estado + formato para Claude) y
-  `--fix <review.md>` (aplica las correcciones de Claude). El estado de cada módulo
-  se guarda en `.deep/claudejob/state/`. No modifica el comportamiento de `deep build`.
+  `--init` (plantilla; `--force` regenera y guarda copia `.bak`), `--review`
+  (vuelca estado + formato para Claude) y `--fix <review.md>` (aplica las
+  correcciones de Claude). El estado de cada módulo se guarda en
+  `.deep/claudejob/state/`. No modifica el comportamiento de `deep build`.
 - Persistencia del historial de chat entre sesiones.
 - `config set-lang` — idioma preferido de las respuestas, persistido.
 

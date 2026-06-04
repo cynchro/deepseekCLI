@@ -119,5 +119,31 @@ class RenderReviewTests(unittest.TestCase):
             self.assertNotIn("RESPONSE.md", out)
 
 
+class InitForceTests(unittest.TestCase):
+    def test_init_creates_and_does_not_overwrite_without_force(self):
+        from cli.commands import run_claudejob
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job = root / ".deep" / "job.md"
+            run_claudejob(api_key="x", project_dir=root, init=True)
+            self.assertTrue(job.exists())
+            job.write_text("# JOB: lleno por el usuario\n", encoding="utf-8")
+            # sin --force no debe pisar el contenido del usuario
+            run_claudejob(api_key="x", project_dir=root, init=True)
+            self.assertEqual(job.read_text(encoding="utf-8"), "# JOB: lleno por el usuario\n")
+
+    def test_init_force_regenerates_and_backs_up(self):
+        from cli.commands import run_claudejob
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job = root / ".deep" / "job.md"
+            run_claudejob(api_key="x", project_dir=root, init=True)
+            job.write_text("# JOB: viejo\n", encoding="utf-8")
+            run_claudejob(api_key="x", project_dir=root, init=True, force=True)
+            # el job se regeneró (plantilla) y el viejo quedó en .bak
+            self.assertIn("## TASKS", job.read_text(encoding="utf-8"))
+            self.assertEqual((job.parent / "job.md.bak").read_text(encoding="utf-8"), "# JOB: viejo\n")
+
+
 if __name__ == "__main__":
     unittest.main()

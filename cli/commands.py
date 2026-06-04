@@ -327,7 +327,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
                   model: str = "deepseek-chat", rules: List[str] = None,
                   init: bool = False, review: bool = False,
                   fix_file: Optional[str] = None, auto_fix: bool = False,
-                  verbose: bool = False) -> None:
+                  force: bool = False, verbose: bool = False) -> None:
     """Claude planifica (job.md), DeepSeek construye y corrige.
 
     Modos:
@@ -341,10 +341,16 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
 
     # ── --init: plantilla para que la llene Claude ───────────────────────────
     if init:
-        if job_path.exists():
+        if job_path.exists() and not force:
             print(f"⚠️  Ya existe {job_path} — no se sobreescribe.")
+            print("   Usá  deep claudejob --init --force  para regenerar la plantilla")
+            print("   (se guarda una copia .bak del job actual).")
             return
         job_path.parent.mkdir(parents=True, exist_ok=True)
+        if job_path.exists():
+            backup = job_path.with_suffix(job_path.suffix + ".bak")
+            job_path.replace(backup)
+            print(f"💾 Copia del job anterior: {backup}")
         job_path.write_text(cj.job_template(project_dir.name), encoding="utf-8")
         print(f"✅ Plantilla creada en {job_path}")
         print("   Pedile a Claude que la complete y después corré: deep claudejob")

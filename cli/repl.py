@@ -93,6 +93,7 @@ _HELP = """
   update <cambio>        Modifica el proyecto del directorio actual
   claudejob              Claude planifica (job.md), DeepSeek construye
   claudejob --init       Crea la plantilla job.md para completar con Claude
+  claudejob --init --force  Regenera la plantilla aunque exista (guarda .bak)
   claudejob --review     Vuelca estado para que Claude revise el proyecto
   claudejob --fix <md>   Aplica las correcciones que escribió Claude
   ask <pregunta>         Hace una pregunta sin generar proyecto
@@ -279,6 +280,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         init = "--init" in args
         review = "--review" in args
         auto_fix = "-f" in args or "--auto-fix" in args
+        force = "--force" in args
         fix_file = None
         job_file = None
         for i, a in enumerate(args):
@@ -290,6 +292,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             api_key=api_key, project_dir=Path.cwd(), job_file=job_file,
             rules=load_rules(Path.cwd() / ".deeprules"),
             init=init, review=review, fix_file=fix_file, auto_fix=auto_fix,
+            force=force,
         )
 
     elif cmd == "skill":

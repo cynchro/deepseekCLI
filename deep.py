@@ -127,6 +127,8 @@ def _legacy(argv: list):
     p_cj.add_argument("--model", default="deepseek-chat", metavar="MODELO")
     p_cj.add_argument("--init", action="store_true",
                       help="Crea la plantilla job.md para que la complete Claude")
+    p_cj.add_argument("--force", action="store_true",
+                      help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
     p_cj.add_argument("--review", action="store_true",
                       help="Vuelca estado + formato para que Claude revise")
     p_cj.add_argument("--fix", metavar="REVIEW", dest="fix_file",
@@ -143,7 +145,7 @@ def _legacy(argv: list):
             job_file=args.job, model=args.model,
             rules=load_rules(Path.cwd() / ".deeprules", project_dir / ".deeprules"),
             init=args.init, review=args.review, fix_file=args.fix_file,
-            auto_fix=getattr(args, "auto_fix", False),
+            auto_fix=getattr(args, "auto_fix", False), force=args.force,
         )
 
     p_cj.set_defaults(func=do_claudejob)

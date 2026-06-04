@@ -660,6 +660,7 @@ Cada `claude ...` lo invocás vos por fuera (con tu propio CLI de Claude). `deep
 
 ```bash
 deep claudejob --init                    # crea la plantilla .deep/job.md
+deep claudejob --init --force            # regenera la plantilla (guarda copia .bak)
 deep claudejob                           # construye todos los módulos
 deep claudejob -f                        # corrige automáticamente los módulos que fallen el build
 deep claudejob --review                  # vuelca estado + formato para Claude
