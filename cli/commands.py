@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import core.balance as bal
-from core import claudejob as cj
+from core import navigator as nav
 from core.system import DeepSeekLearningSystem
 from core.memory import _EXPERIENCES_FILE
 from cli.display import show_balance, show_files, show_evaluation, show_history
@@ -323,18 +323,18 @@ def run_update(change: str, api_key: str, project_dir: Path,
         print(f"\n❌ Error: {result.get('error', 'desconocido')}")
 
 
-def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = None,
+def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = None,
                   model: str = "deepseek-chat", rules: List[str] = None,
                   init: bool = False, review: bool = False,
                   fix_file: Optional[str] = None, auto_fix: bool = False,
                   force: bool = False, verbose: bool = False) -> None:
-    """Claude planifica (job.md), DeepSeek construye y corrige.
+    """El navigator planifica (job.md), DeepSeek construye y corrige.
 
     Modos:
-      (default)        construye cada módulo del job usando el plan de Claude
-      init=True        emite la plantilla job.md para que la complete Claude
-      review=True      vuelca estado + formato de corrección para pasar a Claude
-      fix_file=...     aplica las correcciones que Claude escribió en review.md
+      (default)        construye cada módulo del job usando el plan del navigator
+      init=True        emite la plantilla job.md para que la complete el navigator
+      review=True      vuelca estado + formato de corrección para pasar al navigator
+      fix_file=...     aplica las correcciones que el navigator escribió en review.md
     """
     project_dir = Path(project_dir)
     job_path = Path(job_file) if job_file else project_dir / ".deep" / "job.md"
@@ -343,7 +343,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
     if init:
         if job_path.exists() and not force:
             print(f"⚠️  Ya existe {job_path} — no se sobreescribe.")
-            print("   Usá  deep claudejob --init --force  para regenerar la plantilla")
+            print("   Usá  deep navigator --init --force  para regenerar la plantilla")
             print("   (se guarda una copia .bak del job actual).")
             return
         job_path.parent.mkdir(parents=True, exist_ok=True)
@@ -351,20 +351,21 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
             backup = job_path.with_suffix(job_path.suffix + ".bak")
             job_path.replace(backup)
             print(f"💾 Copia del job anterior: {backup}")
-        job_path.write_text(cj.job_template(project_dir.name), encoding="utf-8")
+        job_path.write_text(nav.job_template(project_dir.name), encoding="utf-8")
         print(f"✅ Plantilla creada en {job_path}")
-        print("   Pedile a Claude que la complete y después corré: deep claudejob")
+        print("   Pedile al navigator (Claude, ChatGPT, Gemini…) que la complete")
+        print("   y después corré: deep navigator")
         return
 
     if not job_path.exists():
-        print(f"❌ No se encontró {job_path}. Creá uno con: deep claudejob --init")
+        print(f"❌ No se encontró {job_path}. Creá uno con: deep navigator --init")
         return
 
-    job = cj.parse_job(job_path.read_text(encoding="utf-8"))
+    job = nav.parse_job(job_path.read_text(encoding="utf-8"))
 
     # ── --review: estado + formato para que Claude revise ────────────────────
     if review:
-        print(cj.render_review(project_dir, job))
+        print(nav.render_review(project_dir, job))
         return
 
     if job["errors"]:
@@ -389,7 +390,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
         if not fpath.exists():
             print(f"❌ Archivo de correcciones no encontrado: {fpath}")
             return
-        corr = cj.parse_corrections(fpath.read_text(encoding="utf-8"))
+        corr = nav.parse_corrections(fpath.read_text(encoding="utf-8"))
         if corr["errors"]:
             for e in corr["errors"]:
                 print(f"❌ {e}")
@@ -412,7 +413,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
         return
 
     # ── Default: build por módulo (Claude planifica, DeepSeek construye) ─────
-    print(f"\n🏗️  claudejob: {job['title']}")
+    print(f"\n🏗️  navigator: {job['title']}")
     print(f"📂 Destino: {project_dir.resolve()}")
     print(f"📦 Módulos: {len(job['modules'])}")
     if combined_rules:
@@ -425,7 +426,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
         # Plan inyectado = arquitectura global de Claude + detalle del módulo.
         # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
         plan = (
-            f"PLAN GENERAL (definido por el arquitecto):\n{job['plan']}\n\n"
+            f"PLAN GENERAL (definido por el navigator):\n{job['plan']}\n\n"
             f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
         )
         system = _make_system()
@@ -438,7 +439,7 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
             print(f"   ❌ Error: {e}")
             continue
 
-        cj.save_module_state(project_dir, mod["name"], result)
+        nav.save_module_state(project_dir, mod["name"], result)
         if result.get("success"):
             print(f"   ✅ módulo ok — {len(result.get('files_written', []))} archivo(s)")
         else:
@@ -447,9 +448,9 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
                 _do_fix(system, task, result, verbose)
         _show_postcheck(result)
 
-    print("\n✅ claudejob terminado. Para que Claude revise:")
-    print('   deep claudejob --review | claude "revisá el proyecto" > review.md')
-    print("   deep claudejob --fix review.md")
+    print("\n✅ navigator terminado. Para que el navigator revise:")
+    print('   deep navigator --review | claude "revisá el proyecto" > review.md   # o pegá la salida en ChatGPT/Gemini')
+    print("   deep navigator --fix review.md")
 
 
 def _show_postcheck(result: dict) -> None:

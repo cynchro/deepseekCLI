@@ -1,15 +1,15 @@
 """
-claudejob — capa de orquestación donde Claude (u otro arquitecto externo) planifica
-y DeepSeek construye + corrige.
+navigator — capa de orquestación donde un LLM navigator externo (Claude, ChatGPT,
+Gemini, etc.) planifica y DeepSeek construye + corrige.
 
 Este módulo es PURO: solo parsea el archivo de job, valida, genera plantillas y
 maneja el estado por módulo en disco. No hace llamadas a la API ni toca el core.
 La orquestación (que reusa DeepSeekLearningSystem) vive en cli/commands.py.
 
 Contrato de archivos:
-  .deep/job.md                      → spec inmutable que escribe el arquitecto (Claude)
-  .deep/claudejob/state/<mod>.json  → estado de cada módulo construido por DeepSeek
-  review.md                         → correcciones efímeras que escribe Claude (se consumen)
+  .deep/job.md                    → spec inmutable que escribe el navigator
+  .deep/navigator/state/<mod>.json → estado de cada módulo construido por DeepSeek
+  review.md                       → correcciones efímeras que escribe el navigator (se consumen)
 """
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ def parse_corrections(text: str) -> Dict:
 
     errors: List[str] = []
     if "CORRECTIONS" not in secs:
-        errors.append("Falta la sección `## CORRECTIONS`. Claude debe escribir las correcciones ahí.")
+        errors.append("Falta la sección `## CORRECTIONS`. El navigator debe escribir las correcciones ahí.")
     elif not modules:
         errors.append("`## CORRECTIONS` no tiene módulos (`### <nombre>`). Nada que corregir.")
     return {"modules": modules, "errors": errors}
@@ -105,7 +105,7 @@ def parse_corrections(text: str) -> Dict:
 JOB_TEMPLATE = """# JOB: {title}
 
 ## PLAN
-<!-- Arquitectura general del proyecto. Lo escribe el arquitecto (Claude).
+<!-- Arquitectura general del proyecto. Lo escribe el navigator.
      DeepSeek usa esto como plan y NO vuelve a planificar. -->
 
 ## RULES
@@ -137,7 +137,7 @@ def _slug(name: str) -> str:
 
 
 def state_dir(project_dir: Path) -> Path:
-    return Path(project_dir) / ".deep" / "claudejob" / "state"
+    return Path(project_dir) / ".deep" / "navigator" / "state"
 
 
 def save_module_state(project_dir: Path, module: str, result: Dict) -> Path:
@@ -179,7 +179,7 @@ def load_all_states(project_dir: Path) -> List[Dict]:
     return states
 
 
-# ── Render del review (lo que el usuario pasa a Claude) ──────────────────────
+# ── Render del review (lo que el usuario pasa al navigator) ──────────────────
 
 def _relative_code_files(paths: List[str], project_dir: Path) -> List[str]:
     """Normaliza rutas a relativas, descartando metadatos de .deep y RESPONSE.md."""
@@ -217,10 +217,10 @@ def _files_on_disk(project_dir: Path) -> List[str]:
 
 
 def render_review(project_dir: Path, job: Dict) -> str:
-    """Genera el texto que el usuario pipea a Claude para que revise el proyecto.
+    """Genera el texto que el usuario pasa al navigator para que revise el proyecto.
     Muestra, por módulo, lo PEDIDO (TASKS) frente a los archivos que DeepSeek
     construyó, más el inventario completo en disco — para detectar invención
-    (archivos o dependencias que nadie pidió). Claude lee los archivos directamente."""
+    (archivos o dependencias que nadie pidió). El navigator lee los archivos directamente."""
     project_dir = Path(project_dir)
     states = {s["module"]: s for s in load_all_states(project_dir)}
     on_disk = _files_on_disk(project_dir)
@@ -232,7 +232,7 @@ def render_review(project_dir: Path, job: Dict) -> str:
     lines = [
         f"# REVIEW REQUEST: {job.get('title', 'job')}",
         "",
-        "Sos el arquitecto. Revisá el proyecto construido por DeepSeek en este directorio",
+        "Sos el navigator (el arquitecto del proyecto). Revisá lo que construyó DeepSeek en este directorio",
         "(podés leer los archivos directamente). Buscá:",
         "- problemas de ARQUITECTURA y diseño (no de sintaxis, de eso se encarga DeepSeek);",
         "- INVENCIÓN: archivos, dependencias o comportamiento que NO pediste en TASKS.",

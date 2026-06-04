@@ -577,20 +577,24 @@ Hay ejemplos listos para usar en [`examples/skills/`](examples/skills/).
 
 ---
 
-## claudejob — Claude planifica, DeepSeek construye
+## navigator — un LLM navigator planifica, DeepSeek construye
 
-`claudejob` es un flujo opcional donde **Claude (u otro arquitecto externo) hace el plan y DeepSeek lo ejecuta y corrige**. La idea: separar los dos roles que cada modelo hace mejor.
+`navigator` es un flujo opcional donde **un LLM navigator externo hace el plan y DeepSeek lo ejecuta y corrige**. La idea: separar los dos roles que cada modelo hace mejor.
 
 | Rol | Quién |
 |---|---|
-| Arquitecto / planificador / revisor | **Claude** |
+| Arquitecto / planificador / revisor | **El LLM que vos elijas** |
 | Constructor / corrector | **DeepSeek (`deep`)** |
 
-> **No reemplaza nada.** `deep build` y su planificador interno siguen funcionando igual. `claudejob` es una puerta de entrada adicional: cuando la usás, el plan lo pone Claude y DeepSeek **se saltea su fase de planificación** (no hay dos arquitectos pisándose). Para todo lo demás, `deep` funciona como siempre.
+> **Cualquier LLM sirve como navigator.** El plan se escribe en un archivo markdown (`job.md`); quién lo escriba es indistinto: **Claude, ChatGPT, Gemini, Llama, el que prefieras**. `deep` nunca habla con ese modelo — solo lee el `job.md` que llenó. La ventaja es usar un modelo *superior* en planificación y arquitectura para diseñar, y dejar que DeepSeek (más barato) ejecute el código módulo por módulo siguiendo ese plan.
+
+> **No reemplaza nada.** `deep build` y su planificador interno siguen funcionando igual. `navigator` es una puerta de entrada adicional: cuando la usás, el plan lo pone el navigator y DeepSeek **se saltea su fase de planificación** (no hay dos arquitectos pisándose). Para todo lo demás, `deep` funciona como siempre.
+
+> *El comando se llamaba `claudejob`. Sigue funcionando como alias deprecado, pero el nombre nuevo es `navigator` porque el LLM que planifica no tiene por qué ser Claude.*
 
 ### El archivo `job.md`
 
-Hay **un solo archivo fuente de verdad**, que escribe Claude: `.deep/job.md`. Tiene cuatro secciones (los nombres no distinguen mayúsculas):
+Hay **un solo archivo fuente de verdad**, que escribe el navigator: `.deep/job.md`. Tiene cuatro secciones (los nombres no distinguen mayúsculas):
 
 ```markdown
 # JOB: SaaS inmobiliario
@@ -617,30 +621,32 @@ Controllers finos, lógica en servicios.
 - **`## RULES`** → restricciones (se combinan con tu `.deeprules` si existe). `--init` ya trae reglas **anti-invención** por defecto (no agregar dependencias ni archivos no pedidos, marcar TODO en vez de inventar).
 - **`## TASKS`** → un `### <módulo>` por cada pieza. DeepSeek construye **uno por uno**.
 
-> **Sobre fidelidad / invención:** ningún plan elimina al 100% que DeepSeek invente, porque debe completar lo que el plan no especifica. Dos cosas lo reducen: (1) cuanto más concretos sean los `TASKS` (rutas de archivo, firmas, dependencias, esquemas), menos margen de invención; (2) el loop `--review` / `--fix` es la red de seguridad — Claude lee el output real y corrige lo que se desvió.
+> **Sobre fidelidad / invención:** ningún plan elimina al 100% que DeepSeek invente, porque debe completar lo que el plan no especifica. Dos cosas lo reducen: (1) cuanto más concretos sean los `TASKS` (rutas de archivo, firmas, dependencias, esquemas), menos margen de invención; (2) el loop `--review` / `--fix` es la red de seguridad — el navigator lee el output real y corrige lo que se desvió.
 
 ### Flujo completo
 
 ```bash
-# 1. Generás la plantilla y se la das a Claude para que la complete
-deep claudejob --init
-# (Claude llena .deep/job.md con plan + módulos)
+# 1. Generás la plantilla y se la das a tu navigator para que la complete
+deep navigator --init
+# (Claude / ChatGPT / Gemini llena .deep/job.md con plan + módulos)
 
-# 2. DeepSeek construye módulo por módulo, siguiendo el plan de Claude
-deep claudejob
+# 2. DeepSeek construye módulo por módulo, siguiendo ese plan
+deep navigator
 
-# 3. Claude revisa el proyecto construido
-deep claudejob --review | claude "revisá el proyecto" > review.md
+# 3. El navigator revisa el proyecto construido
+deep navigator --review | claude "revisá el proyecto" > review.md
+#   o, si usás otro modelo: deep navigator --review > contexto.md
+#   y pegás contexto.md en ChatGPT/Gemini, guardando la respuesta como review.md
 
-# 4. DeepSeek aplica las correcciones que escribió Claude
-deep claudejob --fix review.md
+# 4. DeepSeek aplica las correcciones que escribió el navigator
+deep navigator --fix review.md
 ```
 
-Cada `claude ...` lo invocás vos por fuera (con tu propio CLI de Claude). `deep` **nunca llama a la API de Claude**: el humano hace de pegamento entre los dos. Así `deep` no depende de credenciales ni costos de otro proveedor.
+El paso 3 lo hacés vos por fuera. `deep` **nunca llama a la API del navigator**: el humano hace de pegamento entre los dos. Si tenés un CLI (como `claude`) podés pipear directo; si usás una interfaz web (ChatGPT, Gemini) volcás el contexto a un archivo y pegás. Así `deep` no depende de credenciales ni costos de otro proveedor.
 
 ### Correcciones
 
-`deep claudejob --review` no corrige nada: vuelca, por cada módulo, **lo que pediste en `TASKS` frente a los archivos que DeepSeek construyó**, más el inventario completo en disco — incluyendo una sección de archivos **no atribuidos a ningún módulo** para detectar invención de un vistazo. También incluye el **formato exacto** que Claude tiene que devolver. Claude lee los archivos del proyecto directamente y escribe sus correcciones en un `review.md`:
+`deep navigator --review` no corrige nada: vuelca, por cada módulo, **lo que pediste en `TASKS` frente a los archivos que DeepSeek construyó**, más el inventario completo en disco — incluyendo una sección de archivos **no atribuidos a ningún módulo** para detectar invención de un vistazo. También incluye el **formato exacto** que el navigator tiene que devolver. El LLM lee los archivos del proyecto y escribe sus correcciones en un `review.md`:
 
 ```markdown
 ## CORRECTIONS
@@ -650,36 +656,38 @@ Cada `claude ...` lo invocás vos por fuera (con tu propio CLI de Claude). `deep
 - falta validación en el create
 ```
 
-`deep claudejob --fix review.md` consume ese archivo y aplica un `update` por cada módulo listado. El `review.md` es **efímero**: se lee, se aplica y lo podés descartar.
+`deep navigator --fix review.md` consume ese archivo y aplica un `update` por cada módulo listado. El `review.md` es **efímero**: se lee, se aplica y lo podés descartar.
 
 ### Estado por módulo
 
-`deep` guarda el resultado de cada módulo en `.deep/claudejob/state/<módulo>.json` (qué se construyó, si pasó la evaluación, qué archivos). Eso permite saber el estado del job sin reconstruir todo y es lo que alimenta el `--review`.
+`deep` guarda el resultado de cada módulo en `.deep/navigator/state/<módulo>.json` (qué se construyó, si pasó la evaluación, qué archivos). Eso permite saber el estado del job sin reconstruir todo y es lo que alimenta el `--review`.
 
 ### Opciones
 
 ```bash
-deep claudejob --init                    # crea la plantilla .deep/job.md
-deep claudejob --init --force            # regenera la plantilla (guarda copia .bak)
-deep claudejob                           # construye todos los módulos
-deep claudejob -f                        # corrige automáticamente los módulos que fallen el build
-deep claudejob --review                  # vuelca estado + formato para Claude
-deep claudejob --fix review.md           # aplica correcciones de Claude
-deep claudejob --model deepseek-reasoner # construye con el modelo de razonamiento
-deep claudejob -j ruta/job.md -o ~/proy  # job y directorio de salida personalizados
+deep navigator --init                    # crea la plantilla .deep/job.md
+deep navigator --init --force            # regenera la plantilla (guarda copia .bak)
+deep navigator                           # construye todos los módulos
+deep navigator -f                        # corrige automáticamente los módulos que fallen el build
+deep navigator --review                  # vuelca estado + formato para el navigator
+deep navigator --fix review.md           # aplica correcciones del navigator
+deep navigator --model deepseek-reasoner # construye con el modelo de razonamiento
+deep navigator -j ruta/job.md -o ~/proy  # job y directorio de salida personalizados
 ```
+
+> `deep claudejob ...` sigue funcionando como alias deprecado de `deep navigator ...`.
 
 ### Quién manda sobre el código
 
-Con `claudejob` conviven tres opiniones sobre el resultado, y cada una manda en lo suyo:
+Con `navigator` conviven tres opiniones sobre el resultado, y cada una manda en lo suyo:
 
 | Quién | Autoridad sobre |
 |---|---|
-| Claude (`--review`) | **Arquitectura y diseño** |
+| El navigator (`--review`) | **Arquitectura y diseño** |
 | Evaluación interna de `deep` (fase 4) | Si el módulo cumple la tarea |
 | `postcheck` | Que el código no se rompa (imports, Docker, lockfiles) |
 
-No compiten porque opinan de cosas distintas: Claude no revisa sintaxis, `postcheck` no opina de arquitectura.
+No compiten porque opinan de cosas distintas: el navigator no revisa sintaxis, `postcheck` no opina de arquitectura.
 
 ---
 
@@ -693,9 +701,9 @@ mi-proyecto/
 │   ├── context.json      # tarea, modelo y plan usado
 │   ├── evaluation.json   # resultado de la evaluación
 │   ├── RESPONSE.md       # respuesta completa del modelo
-│   ├── job.md            # (claudejob) plan que escribió Claude
-│   └── claudejob/
-│       └── state/        # (claudejob) estado de cada módulo construido
+│   ├── job.md            # (plan) plan que escribió el navigator
+│   └── plan/
+│       └── state/        # (plan) estado de cada módulo construido
 └── ... archivos del proyecto
 ```
 

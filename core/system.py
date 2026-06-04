@@ -52,7 +52,7 @@ class DeepSeekLearningSystem:
             plan = self._plan(task)
             _dbg.log_block("PHASE_1", "plan", plan)
         else:
-            # Plan provisto externamente (ej. claudejob): se saltea el planner de DeepSeek.
+            # Plan provisto externamente (ej. deep navigator): se saltea el planner de DeepSeek.
             _dbg.log("PHASE", "1 — planificación (plan externo, se saltea _plan)")
             _dbg.log_block("PHASE_1", "plan_external", plan)
 

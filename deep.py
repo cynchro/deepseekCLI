@@ -116,31 +116,31 @@ def _legacy(argv: list):
 
     p_upd.set_defaults(func=do_update)
 
-    # ── claudejob ──────────────────────────────────────────────────────────────
-    p_cj = sub.add_parser(
-        "claudejob",
-        help="Claude planifica (job.md) y DeepSeek construye/corrige")
-    p_cj.add_argument("-j", "--job", metavar="ARCHIVO",
-                      help="Ruta del job.md (por defecto .deep/job.md)")
-    p_cj.add_argument("-o", "--output", metavar="DIR",
-                      help="Directorio del proyecto (por defecto el actual)")
-    p_cj.add_argument("--model", default="deepseek-chat", metavar="MODELO")
-    p_cj.add_argument("--init", action="store_true",
-                      help="Crea la plantilla job.md para que la complete Claude")
-    p_cj.add_argument("--force", action="store_true",
-                      help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
-    p_cj.add_argument("--review", action="store_true",
-                      help="Vuelca estado + formato para que Claude revise")
-    p_cj.add_argument("--fix", metavar="REVIEW", dest="fix_file",
-                      help="Aplica las correcciones de Claude desde un review.md")
-    p_cj.add_argument("-f", "--auto-fix", action="store_true",
-                      help="Corrige automáticamente los módulos que fallen el build")
+    # ── navigator ────────────────────────────────────────────────────────────
+    # Un LLM navigator externo (Claude, ChatGPT, Gemini…) planifica en job.md
+    # y DeepSeek construye/corrige. 'claudejob' queda como alias deprecado.
+    def _add_navigator_args(p):
+        p.add_argument("-j", "--job", metavar="ARCHIVO",
+                       help="Ruta del job.md (por defecto .deep/job.md)")
+        p.add_argument("-o", "--output", metavar="DIR",
+                       help="Directorio del proyecto (por defecto el actual)")
+        p.add_argument("--model", default="deepseek-chat", metavar="MODELO")
+        p.add_argument("--init", action="store_true",
+                       help="Crea la plantilla job.md para que la complete el navigator")
+        p.add_argument("--force", action="store_true",
+                       help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
+        p.add_argument("--review", action="store_true",
+                       help="Vuelca estado + formato para que el navigator revise")
+        p.add_argument("--fix", metavar="REVIEW", dest="fix_file",
+                       help="Aplica las correcciones del navigator desde un review.md")
+        p.add_argument("-f", "--auto-fix", action="store_true",
+                       help="Corrige automáticamente los módulos que fallen el build")
 
-    def do_claudejob(args):
+    def do_navigator(args):
         from core.rules import load_rules
-        from cli.commands import run_claudejob
+        from cli.commands import run_navigator
         project_dir = Path(args.output) if args.output else Path.cwd()
-        run_claudejob(
+        run_navigator(
             api_key=_require_api_key(), project_dir=project_dir,
             job_file=args.job, model=args.model,
             rules=load_rules(Path.cwd() / ".deeprules", project_dir / ".deeprules"),
@@ -148,6 +148,21 @@ def _legacy(argv: list):
             auto_fix=getattr(args, "auto_fix", False), force=args.force,
         )
 
+    p_nav = sub.add_parser(
+        "navigator",
+        help="Un LLM navigator planifica (job.md) y DeepSeek construye/corrige")
+    _add_navigator_args(p_nav)
+    p_nav.set_defaults(func=do_navigator)
+
+    # alias deprecado: deep claudejob → deep navigator (oculto del --help)
+    def do_claudejob(args):
+        print("⚠️  'deep claudejob' quedó deprecado; usá 'deep navigator'. "
+              "El alias seguirá funcionando por ahora.")
+        do_navigator(args)
+
+    # sin help= → argparse no lo lista en --help (alias oculto)
+    p_cj = sub.add_parser("claudejob")
+    _add_navigator_args(p_cj)
     p_cj.set_defaults(func=do_claudejob)
 
     # ── doctor ───────────────────────────────────────────────────────────────

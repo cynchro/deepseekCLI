@@ -8,16 +8,23 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
-- **`deep claudejob`** — flujo opcional donde Claude (u otro arquitecto externo)
-  planifica y DeepSeek construye y corrige. Un solo archivo fuente (`.deep/job.md`)
-  con secciones `PLAN`/`RULES`/`TASKS`; DeepSeek construye módulo por módulo usando
-  el plan de Claude y se saltea su propia fase de planificación. Subcomandos:
-  `--init` (plantilla; `--force` regenera y guarda copia `.bak`), `--review`
-  (vuelca estado + formato para Claude) y `--fix <review.md>` (aplica las
-  correcciones de Claude). El estado de cada módulo se guarda en
-  `.deep/claudejob/state/`. No modifica el comportamiento de `deep build`.
+- **`deep navigator`** — flujo opcional donde un LLM navigator externo (Claude,
+  ChatGPT, Gemini, etc.) planifica y DeepSeek construye y corrige. Un solo archivo
+  fuente (`.deep/job.md`) con secciones `PLAN`/`RULES`/`TASKS`; DeepSeek construye
+  módulo por módulo usando ese plan y se saltea su propia fase de planificación.
+  Subcomandos: `--init` (plantilla; `--force` regenera y guarda copia `.bak`),
+  `--review` (vuelca estado + formato para el navigator) y `--fix <review.md>`
+  (aplica las correcciones). El estado de cada módulo se guarda en
+  `.deep/navigator/state/`. No modifica el comportamiento de `deep build`.
 - Persistencia del historial de chat entre sesiones.
 - `config set-lang` — idioma preferido de las respuestas, persistido.
+
+### Changed
+- **`deep claudejob` → `deep navigator`.** El comando se renombró porque el LLM
+  navigator no tiene por qué ser Claude (cualquier modelo puede llenar el
+  `job.md`). `claudejob` sigue funcionando como **alias deprecado** (oculto del
+  `--help`, con aviso). El directorio de estado pasó de `.deep/claudejob/` a
+  `.deep/navigator/`, y el módulo interno de `core/claudejob.py` a `core/navigator.py`.
 
 ### Fixed
 - **Escritura de archivos generados** (`core/writer.py`): el extractor exigía bloques
@@ -26,7 +33,7 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   archivo (solo `RESPONSE.md`), o tomaban encabezados de sección de un README
   (`Instalación`, `Uso`, `Tests`) como nombres de archivo. Ahora la extracción se
   delimita por los marcadores `### archivo:` y conserva los fences internos del
-  contenido. Afecta a todos los comandos que escriben archivos, no solo `claudejob`.
+  contenido. Afecta a todos los comandos que escriben archivos, no solo `deep navigator`.
 - Crash en la validación posterior al build (`core/postcheck.py` llamaba a
   `FileWriter._extract_named_blocks` sin instancia); ahora es `@staticmethod`.
 
