@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import core.balance as bal
+from core import claudejob as cj
 from core.system import DeepSeekLearningSystem
 from core.memory import _EXPERIENCES_FILE
 from cli.display import show_balance, show_files, show_evaluation, show_history
@@ -320,6 +321,129 @@ def run_update(change: str, api_key: str, project_dir: Path,
         _show_postcheck(result)
     else:
         print(f"\n❌ Error: {result.get('error', 'desconocido')}")
+
+
+def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = None,
+                  model: str = "deepseek-chat", rules: List[str] = None,
+                  init: bool = False, review: bool = False,
+                  fix_file: Optional[str] = None, auto_fix: bool = False,
+                  verbose: bool = False) -> None:
+    """Claude planifica (job.md), DeepSeek construye y corrige.
+
+    Modos:
+      (default)        construye cada módulo del job usando el plan de Claude
+      init=True        emite la plantilla job.md para que la complete Claude
+      review=True      vuelca estado + formato de corrección para pasar a Claude
+      fix_file=...     aplica las correcciones que Claude escribió en review.md
+    """
+    project_dir = Path(project_dir)
+    job_path = Path(job_file) if job_file else project_dir / ".deep" / "job.md"
+
+    # ── --init: plantilla para que la llene Claude ───────────────────────────
+    if init:
+        if job_path.exists():
+            print(f"⚠️  Ya existe {job_path} — no se sobreescribe.")
+            return
+        job_path.parent.mkdir(parents=True, exist_ok=True)
+        job_path.write_text(cj.job_template(project_dir.name), encoding="utf-8")
+        print(f"✅ Plantilla creada en {job_path}")
+        print("   Pedile a Claude que la complete y después corré: deep claudejob")
+        return
+
+    if not job_path.exists():
+        print(f"❌ No se encontró {job_path}. Creá uno con: deep claudejob --init")
+        return
+
+    job = cj.parse_job(job_path.read_text(encoding="utf-8"))
+
+    # ── --review: estado + formato para que Claude revise ────────────────────
+    if review:
+        print(cj.render_review(project_dir, job))
+        return
+
+    if job["errors"]:
+        print("❌ El job tiene problemas:")
+        for e in job["errors"]:
+            print(f"   • {e}")
+        return
+
+    combined_rules = (rules or []) + job["rules"]
+
+    def _make_system():
+        return DeepSeekLearningSystem(
+            api_key, output_dir=str(project_dir), model=model,
+            root_is_output_dir=True, rules=combined_rules,
+            on_progress=lambda m: print(f"  ▸ {m}"),
+            on_file=lambda p: print(f"   💾 {p}"),
+        )
+
+    # ── --fix <review.md>: aplica las correcciones de Claude por módulo ──────
+    if fix_file:
+        fpath = Path(fix_file)
+        if not fpath.exists():
+            print(f"❌ Archivo de correcciones no encontrado: {fpath}")
+            return
+        corr = cj.parse_corrections(fpath.read_text(encoding="utf-8"))
+        if corr["errors"]:
+            for e in corr["errors"]:
+                print(f"❌ {e}")
+            return
+        print(f"\n🔧 Correcciones de Claude — {len(corr['modules'])} módulo(s)")
+        for mod in corr["modules"]:
+            print(f"\n── corrigiendo: {mod['name']} ──")
+            system = _make_system()
+            try:
+                result = system.execute_update(
+                    mod["body"], task=f"módulo {mod['name']} — {job['title']}"
+                )
+            except Exception as e:
+                print(f"   ❌ Error: {e}")
+                continue
+            if result.get("success"):
+                print(f"   ✅ {len(result.get('files_updated', []))} archivo(s) actualizado(s).")
+            else:
+                print(f"   ⚠️  {result.get('error', 'sin cambios')}")
+        return
+
+    # ── Default: build por módulo (Claude planifica, DeepSeek construye) ─────
+    print(f"\n🏗️  claudejob: {job['title']}")
+    print(f"📂 Destino: {project_dir.resolve()}")
+    print(f"📦 Módulos: {len(job['modules'])}")
+    if combined_rules:
+        print(f"📏 Reglas:  {len(combined_rules)}")
+
+    total = len(job["modules"])
+    for idx, mod in enumerate(job["modules"], 1):
+        print(f"\n── [{idx}/{total}] módulo: {mod['name']} ──")
+        task = f"{mod['name']}: {mod['body']}".strip()
+        # Plan inyectado = arquitectura global de Claude + detalle del módulo.
+        # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
+        plan = (
+            f"PLAN GENERAL (definido por el arquitecto):\n{job['plan']}\n\n"
+            f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
+        )
+        system = _make_system()
+        try:
+            result = system.execute_and_learn(task, plan=plan)
+        except KeyboardInterrupt:
+            print("\n⚠️  Interrumpido.")
+            return
+        except Exception as e:
+            print(f"   ❌ Error: {e}")
+            continue
+
+        cj.save_module_state(project_dir, mod["name"], result)
+        if result.get("success"):
+            print(f"   ✅ módulo ok — {len(result.get('files_written', []))} archivo(s)")
+        else:
+            print("   ⚠️  el evaluador marcó observaciones")
+            if auto_fix:
+                _do_fix(system, task, result, verbose)
+        _show_postcheck(result)
+
+    print("\n✅ claudejob terminado. Para que Claude revise:")
+    print('   deep claudejob --review | claude "revisá el proyecto" > review.md')
+    print("   deep claudejob --fix review.md")
 
 
 def _show_postcheck(result: dict) -> None:

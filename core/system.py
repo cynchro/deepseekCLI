@@ -41,14 +41,20 @@ class DeepSeekLearningSystem:
         lines = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(self.rules))
         return f"\nREGLAS OBLIGATORIAS (.deeprules):\n{lines}\n"
 
-    def execute_and_learn(self, task: str) -> Dict:
+    def execute_and_learn(self, task: str, plan: str = None) -> Dict:
         _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}")
         _dbg.log("SYSTEM", f"model={self.client.model}  rules={len(self.rules)}")
 
         self._progress("FASE 1")
-        _dbg.log("PHASE", "1 — planificación")
-        plan = self._plan(task)
-        _dbg.log_block("PHASE_1", "plan", plan)
+        if plan is None:
+            # Camino normal: DeepSeek planifica.
+            _dbg.log("PHASE", "1 — planificación")
+            plan = self._plan(task)
+            _dbg.log_block("PHASE_1", "plan", plan)
+        else:
+            # Plan provisto externamente (ej. claudejob): se saltea el planner de DeepSeek.
+            _dbg.log("PHASE", "1 — planificación (plan externo, se saltea _plan)")
+            _dbg.log_block("PHASE_1", "plan_external", plan)
 
         self._progress("FASE 2")
         _dbg.log("PHASE", "2 — ejecución / generación de código")

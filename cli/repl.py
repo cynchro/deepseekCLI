@@ -24,7 +24,7 @@ from core.rules import load_rules
 import core.skills as skills_mod
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
                           run_ask, run_skill, run_update, run_doctor, run_upgrade,
-                          run_show, run_serve)
+                          run_show, run_serve, run_claudejob)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -82,7 +82,7 @@ def _banner() -> str:
         "║           deep — Ecosistema DeepSeek             ║\n"
         f"║                    v{ver:<28}║\n"
         "╚══════════════════════════════════════════════════╝\033[0m\n"
-        "  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
+        "  Comandos: build  update  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
     )
 
 _HELP = """
@@ -91,6 +91,10 @@ _HELP = """
   build <tarea> -f       Genera y corrige automáticamente si falla
   build <tarea> --model deepseek-reasoner
   update <cambio>        Modifica el proyecto del directorio actual
+  claudejob              Claude planifica (job.md), DeepSeek construye
+  claudejob --init       Crea la plantilla job.md para completar con Claude
+  claudejob --review     Vuelca estado para que Claude revise el proyecto
+  claudejob --fix <md>   Aplica las correcciones que escribió Claude
   ask <pregunta>         Hace una pregunta sin generar proyecto
   fix                    Corrige errores del proyecto actual
   show                   Muestra contexto y archivos del proyecto actual
@@ -122,6 +126,7 @@ def _build_completer(skill_names: list):
         "fix":     None, "show":    None, "serve":   None,
         "doctor":  None, "upgrade": None, "balance": None,
         "history": None, "config":  {"set-key": None, "set-lang": None},
+        "claudejob": {"--init": None, "--review": None, "--fix": None},
         "skill":   {"list": None, "new": None},
         "reset":   None, "new":     None,
         "help":    None, "exit":    None, "quit":    None,
@@ -268,6 +273,23 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             model=model, root_is_output_dir=False,
             rules=load_rules(Path.cwd() / ".deeprules"),
             verbose=False, auto_fix=auto_fix,
+        )
+
+    elif cmd == "claudejob":
+        init = "--init" in args
+        review = "--review" in args
+        auto_fix = "-f" in args or "--auto-fix" in args
+        fix_file = None
+        job_file = None
+        for i, a in enumerate(args):
+            if a == "--fix" and i + 1 < len(args):
+                fix_file = args[i + 1]
+            elif a in ("-j", "--job") and i + 1 < len(args):
+                job_file = args[i + 1]
+        run_claudejob(
+            api_key=api_key, project_dir=Path.cwd(), job_file=job_file,
+            rules=load_rules(Path.cwd() / ".deeprules"),
+            init=init, review=review, fix_file=fix_file, auto_fix=auto_fix,
         )
 
     elif cmd == "skill":
