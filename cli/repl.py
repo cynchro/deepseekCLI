@@ -24,9 +24,45 @@ from core.rules import load_rules
 import core.skills as skills_mod
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
                           run_ask, run_skill, run_update, run_doctor, run_upgrade,
-                          run_show, run_serve)
+                          run_show, run_serve, run_claudejob)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
+
+
+def _chat_history_path() -> Path:
+    deep_dir = Path.cwd() / ".deep"
+    if deep_dir.exists():
+        return deep_dir / "chat_history.json"
+    return Path.home() / ".config" / "deep" / "chat_history.json"
+
+
+def _load_chat_history() -> dict:
+    path = _chat_history_path()
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_chat_history(state: dict) -> None:
+    path = _chat_history_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "messages": state.get("ask_history") or [],
+            "active_skill": state.get("active_skill"),
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_chat_history() -> None:
+    path = _chat_history_path()
+    if path.exists():
+        path.unlink()
+
 
 def _banner() -> str:
     try:
@@ -46,7 +82,7 @@ def _banner() -> str:
         "║           deep — Ecosistema DeepSeek             ║\n"
         f"║                    v{ver:<28}║\n"
         "╚══════════════════════════════════════════════════╝\033[0m\n"
-        "  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
+        "  Comandos: build  update  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
     )
 
 _HELP = """
@@ -55,6 +91,11 @@ _HELP = """
   build <tarea> -f       Genera y corrige automáticamente si falla
   build <tarea> --model deepseek-reasoner
   update <cambio>        Modifica el proyecto del directorio actual
+  claudejob              Claude planifica (job.md), DeepSeek construye
+  claudejob --init       Crea la plantilla job.md para completar con Claude
+  claudejob --init --force  Regenera la plantilla aunque exista (guarda .bak)
+  claudejob --review     Vuelca estado para que Claude revise el proyecto
+  claudejob --fix <md>   Aplica las correcciones que escribió Claude
   ask <pregunta>         Hace una pregunta sin generar proyecto
   fix                    Corrige errores del proyecto actual
   show                   Muestra contexto y archivos del proyecto actual
@@ -86,6 +127,7 @@ def _build_completer(skill_names: list):
         "fix":     None, "show":    None, "serve":   None,
         "doctor":  None, "upgrade": None, "balance": None,
         "history": None, "config":  {"set-key": None, "set-lang": None},
+        "claudejob": {"--init": None, "--review": None, "--fix": None},
         "skill":   {"list": None, "new": None},
         "reset":   None, "new":     None,
         "help":    None, "exit":    None, "quit":    None,
@@ -143,6 +185,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         run_history()
 
     elif cmd in ("reset", "new"):
+        _clear_chat_history()
         state.clear()
         print("  Conversación reiniciada.")
 
@@ -152,6 +195,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         else:
             state["ask_history"] = run_ask(" ".join(args), api_key, history=None)
             state["in_conversation"] = True
+            _save_chat_history(state)
 
     elif cmd == "update":
         if not args:
@@ -232,6 +276,25 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             verbose=False, auto_fix=auto_fix,
         )
 
+    elif cmd == "claudejob":
+        init = "--init" in args
+        review = "--review" in args
+        auto_fix = "-f" in args or "--auto-fix" in args
+        force = "--force" in args
+        fix_file = None
+        job_file = None
+        for i, a in enumerate(args):
+            if a == "--fix" and i + 1 < len(args):
+                fix_file = args[i + 1]
+            elif a in ("-j", "--job") and i + 1 < len(args):
+                job_file = args[i + 1]
+        run_claudejob(
+            api_key=api_key, project_dir=Path.cwd(), job_file=job_file,
+            rules=load_rules(Path.cwd() / ".deeprules"),
+            init=init, review=review, fix_file=fix_file, auto_fix=auto_fix,
+            force=force,
+        )
+
     elif cmd == "skill":
         _handle_skill_meta(args, loaded_skills or {})
 
@@ -249,6 +312,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
                 skill, full_input, api_key, history=state.get("ask_history")
             )
             state["in_conversation"] = True
+            _save_chat_history(state)
 
     elif state.get("in_conversation"):
         full_input = (cmd + " " + " ".join(args)).strip()
@@ -260,6 +324,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             )
         else:
             state["ask_history"] = run_ask(full_input, api_key, history=state.get("ask_history"))
+        _save_chat_history(state)
 
     else:
         print(f"  Comando desconocido: '{cmd}'. Escribí 'help'.")
@@ -346,6 +411,14 @@ def _run_rich(api_key: str):
         complete_while_typing=True,
     )
     state: dict = {}
+    saved = _load_chat_history()
+    if saved.get("messages"):
+        state["ask_history"] = saved["messages"]
+        state["in_conversation"] = True
+        if saved.get("active_skill"):
+            state["active_skill"] = saved["active_skill"]
+        n = sum(1 for m in saved["messages"] if m.get("role") == "user")
+        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
     while True:
         try:
             project = _detect_project()
@@ -367,6 +440,14 @@ def _run_rich(api_key: str):
 def _run_basic(api_key: str):
     loaded_skills = skills_mod.load(Path.cwd())
     state: dict = {}
+    saved = _load_chat_history()
+    if saved.get("messages"):
+        state["ask_history"] = saved["messages"]
+        state["in_conversation"] = True
+        if saved.get("active_skill"):
+            state["active_skill"] = saved["active_skill"]
+        n = sum(1 for m in saved["messages"] if m.get("role") == "user")
+        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
     while True:
         try:
             project = _detect_project()

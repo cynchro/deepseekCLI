@@ -28,6 +28,9 @@ debug.log
 # Proyectos generados por deep (directorios con timestamp)
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_*/
 
+# Metadatos de deep / claudejob (contexto, estado, job.md, RESPONSE.md)
+.deep/
+
 # Índice RAG local
 .rag/
 
