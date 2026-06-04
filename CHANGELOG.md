@@ -27,6 +27,11 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   `.deep/navigator/`, y el módulo interno de `core/claudejob.py` a `core/navigator.py`.
 
 ### Fixed
+- **`deep navigator` no dejaba rastro de los errores por módulo.** Las excepciones del
+  loop de build/fix solo se imprimían y se descartaban con `continue` — ni con
+  `--debug` quedaban en `debug.log`. Ahora se registra el traceback completo (tag
+  `NAVIGATOR`) y el módulo que falla se guarda como estado `success=False` (antes
+  aparecía como "no construido" en `--review`).
 - **Escritura de archivos generados** (`core/writer.py`): el extractor exigía bloques
   con fences ```` ``` ````, pero el modelo emite los archivos como `### archivo: ruta`
   seguido de código crudo. Como consecuencia, algunos `build` no escribían ningún

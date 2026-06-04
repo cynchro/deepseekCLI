@@ -8,10 +8,12 @@ import platform
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
 from typing import List, Optional
 
 import core.balance as bal
+import core.debug as _dbg
 from core import navigator as nav
 from core.system import DeepSeekLearningSystem
 from core.memory import _EXPERIENCES_FILE
@@ -405,6 +407,8 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
                 )
             except Exception as e:
                 print(f"   ❌ Error: {e}")
+                _dbg.log("NAVIGATOR", f"fix de {mod['name']} crasheó: {e!r}")
+                _dbg.log_block("NAVIGATOR", "traceback", traceback.format_exc())
                 continue
             if result.get("success"):
                 print(f"   ✅ {len(result.get('files_updated', []))} archivo(s) actualizado(s).")
@@ -437,6 +441,14 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
             return
         except Exception as e:
             print(f"   ❌ Error: {e}")
+            _dbg.log("NAVIGATOR", f"módulo {mod['name']} crasheó: {e!r}")
+            _dbg.log_block("NAVIGATOR", "traceback", traceback.format_exc())
+            # dejar constancia del fallo para que --review lo muestre como tal
+            nav.save_module_state(project_dir, mod["name"], {
+                "success": False,
+                "files_written": [],
+                "outcome": f"crash: {e}",
+            })
             continue
 
         nav.save_module_state(project_dir, mod["name"], result)
