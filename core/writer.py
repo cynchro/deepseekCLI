@@ -35,6 +35,9 @@ class FileWriter:
         _dbg.log("WRITER", f"project_dir={project_dir}  response_chars={len(content)}")
         written = []
 
+        if content.strip() and not self._response_looks_complete(content):
+            _dbg.log("WRITER", "warning: response may be truncated (unclosed code fence)")
+
         named = self._extract_named_blocks(content)
         _dbg.log("WRITER", f"named_blocks={len(named)}")
         if named:
@@ -97,6 +100,13 @@ class FileWriter:
         words = re.sub(r"[^\w\s]", " ", normalize(task.lower())).split()
         key = [w for w in words if w not in _STOP and len(w) > 2][:4]
         return "_".join(key) if key else "proyecto"
+
+    @staticmethod
+    def _response_looks_complete(text: str) -> bool:
+        stripped = text.rstrip()
+        if not stripped:
+            return True
+        return stripped.count("```") % 2 == 0
 
     def _extract_named_blocks(self, content: str) -> List[Tuple[str, str]]:
         results = []

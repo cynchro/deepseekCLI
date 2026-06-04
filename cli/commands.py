@@ -16,6 +16,7 @@ from core.system import DeepSeekLearningSystem
 from core.memory import _EXPERIENCES_FILE
 from cli.display import show_balance, show_files, show_evaluation, show_history
 from cli.spinner import Spinner
+from core.postcheck import format_report
 
 
 def run_build(task: str, api_key: str, output_dir: str,
@@ -93,6 +94,7 @@ def run_build(task: str, api_key: str, output_dir: str,
     show_balance(api_key, label="Crédito después del build", before=before, tokens=tokens)
     show_files(result.get("files_written", []))
     show_evaluation(result)
+    _show_postcheck(result)
 
     if not result.get("success"):
         # Si la heurística confirmó estructura completa, el fallo del LLM puede ser falso negativo
@@ -315,8 +317,22 @@ def run_update(change: str, api_key: str, project_dir: Path,
     n = len(result.get("files_updated", []))
     if result.get("success"):
         print(f"\n✅ {n} archivo(s) actualizado(s).")
+        _show_postcheck(result)
     else:
         print(f"\n❌ Error: {result.get('error', 'desconocido')}")
+
+
+def _show_postcheck(result: dict) -> None:
+    report = result.get("postcheck") or {}
+    fixes = result.get("postcheck_fixes") or []
+    if not report.get("issues") and not report.get("warnings") and not fixes:
+        return
+    print("\n📋 Validación del proyecto:")
+    text = format_report(report, fixes)
+    if text:
+        print(text)
+    if report.get("issues"):
+        print("   💡 Podés corregir con: deep fix")
 
 
 def run_doctor() -> None:
