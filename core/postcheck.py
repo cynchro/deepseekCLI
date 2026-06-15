@@ -36,14 +36,14 @@ def analyze_project(project_dir: Path, response_text: Optional[str] = None) -> D
     if not project_dir.is_dir():
         return {"issues": ["Directorio de proyecto no existe"], "warnings": [], "ok": False}
 
-    issues.extend(_check_ts_imports(project_dir))
+    # Referencias rotas (imports/includes) a archivos inexistentes, vía el registro
+    # de detectores por lenguaje. missing_refs son rutas-objetivo que 'deep fix'
+    # puede regenerar. Agnóstico al lenguaje: sumar uno es una entrada en el registro.
+    ref_issues, missing_refs = _check_references(project_dir)
+    issues.extend(ref_issues)
+
     issues.extend(_check_docker_npm(project_dir))
     warnings.extend(_check_compose_version(project_dir))
-
-    # Referencias PHP (require/include) a archivos que no existen. missing_refs
-    # guarda las rutas-objetivo para que 'deep fix' las pueda regenerar.
-    php_issues, missing_refs = _check_php_includes(project_dir)
-    issues.extend(php_issues)
 
     if response_text:
         issues.extend(_check_response_coverage(project_dir, response_text))
@@ -105,20 +105,75 @@ def format_report(report: Dict, fixes: Optional[List[str]] = None) -> str:
 # ── checks ───────────────────────────────────────────────────────────────────
 
 
-def _check_ts_imports(project_dir: Path) -> List[str]:
-    issues = []
-    for ts_file in project_dir.rglob("*.ts"):
-        if "node_modules" in ts_file.parts or ".deep" in ts_file.parts:
+# ── Registro de detectores de referencias rotas (extensible por lenguaje) ─────
+#
+# Un detector recibe (from_file, text, project_dir) y devuelve una lista de
+# (mensaje, target) donde:
+#   - mensaje: string del issue a mostrar (lo arma el detector, en su jerga).
+#   - target:  ruta relativa al proyecto que debería existir y se puede
+#              regenerar con 'deep fix', o None si no es resoluble sin ambigüedad.
+#
+# Para sumar un lenguaje: escribir su detector y registrarlo en REFERENCE_DETECTORS.
+# El core de generación no se entera de esto: sigue siendo agnóstico.
+
+_DIRS_IGNORED = {"node_modules", "vendor", ".deep"}
+
+
+def _detect_ts_imports(from_file: Path, text: str, project_dir: Path):
+    rel_src = from_file.relative_to(project_dir)
+    out = []
+    for spec in _IMPORT_RE.findall(text):
+        if _resolve_import(from_file, spec):
+            continue
+        # El destino real es ambiguo (x.ts vs x/index.ts): reportar, no regenerar.
+        out.append((f"Import roto en {rel_src}: '{spec}' no existe", None))
+    return out
+
+
+def _detect_php_includes(from_file: Path, text: str, project_dir: Path):
+    rel_src = from_file.relative_to(project_dir)
+    out = []
+    for spec in _PHP_INCLUDE_RE.findall(text):
+        target = (from_file.parent / spec.lstrip("/")).resolve()
+        if target.is_file():
             continue
         try:
-            text = ts_file.read_text(encoding="utf-8")
+            rel = str(target.relative_to(project_dir.resolve()))
+        except ValueError:
+            rel = None  # referencia fuera del proyecto: avisar, no regenerar
+        out.append((f"Referencia rota en {rel_src}: '{spec}' no existe", rel))
+    return out
+
+
+REFERENCE_DETECTORS = {
+    ".ts": _detect_ts_imports,
+    ".tsx": _detect_ts_imports,
+    ".php": _detect_php_includes,
+}
+
+
+def _check_references(project_dir: Path):
+    """Recorre el proyecto y aplica el detector que corresponda a cada extensión.
+    Devuelve (issues, missing_refs)."""
+    issues: List[str] = []
+    missing_refs: List[str] = []
+    seen = set()
+    for f in project_dir.rglob("*"):
+        if not f.is_file() or _DIRS_IGNORED.intersection(f.parts):
+            continue
+        detector = REFERENCE_DETECTORS.get(f.suffix.lower())
+        if not detector:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
         except OSError:
             continue
-        for spec in _IMPORT_RE.findall(text):
-            if not _resolve_import(ts_file, spec):
-                rel = ts_file.relative_to(project_dir)
-                issues.append(f"Import roto en {rel}: '{spec}' no existe")
-    return issues
+        for message, target in detector(f, text, project_dir):
+            issues.append(message)
+            if target and target not in seen:
+                seen.add(target)
+                missing_refs.append(target)
+    return issues, missing_refs
 
 
 def _resolve_import(from_file: Path, spec: str) -> bool:
@@ -133,37 +188,6 @@ def _resolve_import(from_file: Path, spec: str) -> bool:
         if candidate.is_file():
             return True
     return False
-
-
-def _check_php_includes(project_dir: Path):
-    """Detecta require/include a archivos inexistentes (ruta estática vía __DIR__).
-    Devuelve (issues, missing_refs) donde missing_refs son rutas relativas al
-    proyecto que deberían existir y no existen."""
-    issues: List[str] = []
-    missing_refs: List[str] = []
-    seen = set()
-    for php_file in project_dir.rglob("*.php"):
-        if "vendor" in php_file.parts or ".deep" in php_file.parts:
-            continue
-        try:
-            text = php_file.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for spec in _PHP_INCLUDE_RE.findall(text):
-            target = (php_file.parent / spec.lstrip("/")).resolve()
-            if target.is_file():
-                continue
-            try:
-                rel = str(target.relative_to(project_dir.resolve()))
-            except ValueError:
-                # referencia fuera del proyecto: no la regeneramos, solo avisamos
-                rel = None
-            src_rel = php_file.relative_to(project_dir)
-            issues.append(f"Referencia rota en {src_rel}: '{spec}' no existe")
-            if rel and rel not in seen:
-                seen.add(rel)
-                missing_refs.append(rel)
-    return issues, missing_refs
 
 
 def _check_docker_npm(project_dir: Path) -> List[str]:

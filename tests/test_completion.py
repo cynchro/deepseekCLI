@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core import postcheck
 from core.postcheck import analyze_project
 from core.system import DeepSeekLearningSystem
 
@@ -35,6 +36,35 @@ class PhpIncludeCheckTests(unittest.TestCase):
             (root / "Router.php").write_text(
                 "<?php\nrequire_once __DIR__ . '/Controller/' . $class . '.php';\n",
                 encoding="utf-8")
+            report = analyze_project(root)
+            self.assertEqual(report["missing_refs"], [])
+
+
+class ReferenceRegistryTests(unittest.TestCase):
+    def test_new_language_detector_is_picked_up(self):
+        """Sumar un lenguaje = registrar un detector; el core no se toca."""
+        def detect_widget(from_file, text, project_dir):
+            # 'needs: otro.wdg' → referencia a un archivo que debe existir
+            out = []
+            for line in text.splitlines():
+                if line.startswith("needs:"):
+                    out.append((f"falta {line.split(':',1)[1].strip()}",
+                                line.split(":", 1)[1].strip()))
+            return out
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.wdg").write_text("needs: b.wdg\n", encoding="utf-8")
+            registry = dict(postcheck.REFERENCE_DETECTORS)
+            registry[".wdg"] = detect_widget
+            with patch.object(postcheck, "REFERENCE_DETECTORS", registry):
+                report = analyze_project(root)
+            self.assertIn("b.wdg", report["missing_refs"])
+
+    def test_unknown_extension_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "notes.foobar").write_text("require_once 'x';", encoding="utf-8")
             report = analyze_project(root)
             self.assertEqual(report["missing_refs"], [])
 
