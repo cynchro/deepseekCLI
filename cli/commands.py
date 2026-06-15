@@ -170,6 +170,8 @@ def run_fix_current(api_key: str, project_dir: Path, rules: List[str] = None) ->
         "files_written": code_files,
         "outcome": json.dumps(evaluation),
         "plan": ctx.get("plan", ""),
+        "manifest": ctx.get("manifest", []),
+        "missing_files": evaluation.get("missing_files", []),
         "success": evaluation.get("success", False),
     }
 
@@ -205,6 +207,9 @@ def run_fix_current(api_key: str, project_dir: Path, rules: List[str] = None) ->
             display = path
         print(f"   💾 {display}")
 
+    completed = fix_result.get("files_completed", [])
+    if completed:
+        print(f"\n🧩 {len(completed)} archivo(s) faltante(s) generado(s).")
     fixed = fix_result.get("files_fixed", [])
     if fixed:
         print(f"\n🔧 {len(fixed)} archivo(s) corregido(s).")
@@ -892,6 +897,9 @@ def _do_fix(system: DeepSeekLearningSystem, task: str, result: dict,
             display = path
         print(f"   💾 {display}")
 
+    completed = fix_result.get("files_completed", [])
+    if completed:
+        print(f"\n🧩 {len(completed)} archivo(s) faltante(s) generado(s).")
     fixed = fix_result.get("files_fixed", [])
     if fixed:
         print(f"\n🔧 {len(fixed)} archivo(s) corregido(s).")

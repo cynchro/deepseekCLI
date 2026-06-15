@@ -12,6 +12,14 @@ from typing import Dict, List, Optional
 from core.writer import FileWriter
 
 _IMPORT_RE = re.compile(r"""from\s+['"](\.\.?/[^'"]+)['"]""")
+# require/include con ruta estática vía __DIR__ . '...'. Exige que la cadena sea el
+# final del statement (opcional ')' y ';'), para no matchear concatenaciones
+# dinámicas con variables (... . $class . '.php').
+_PHP_INCLUDE_RE = re.compile(
+    r"""(?:require|require_once|include|include_once)\s*\(?\s*"""
+    r"""__DIR__\s*\.\s*['"]([^'"]+)['"]\s*\)?\s*;""",
+    re.IGNORECASE,
+)
 _DOCKER_COPY_BAD = re.compile(
     r"^COPY\s+(?:(?!\./)\S+\s+){2,}\./\s*$",
     re.MULTILINE | re.IGNORECASE,
@@ -32,6 +40,11 @@ def analyze_project(project_dir: Path, response_text: Optional[str] = None) -> D
     issues.extend(_check_docker_npm(project_dir))
     warnings.extend(_check_compose_version(project_dir))
 
+    # Referencias PHP (require/include) a archivos que no existen. missing_refs
+    # guarda las rutas-objetivo para que 'deep fix' las pueda regenerar.
+    php_issues, missing_refs = _check_php_includes(project_dir)
+    issues.extend(php_issues)
+
     if response_text:
         issues.extend(_check_response_coverage(project_dir, response_text))
     else:
@@ -46,7 +59,8 @@ def analyze_project(project_dir: Path, response_text: Optional[str] = None) -> D
         warnings.append("La respuesta del modelo puede estar truncada (sin cierre de bloque ```)")
 
     ok = len(issues) == 0
-    return {"issues": issues, "warnings": warnings, "ok": ok, "project_dir": str(project_dir)}
+    return {"issues": issues, "warnings": warnings, "ok": ok,
+            "missing_refs": missing_refs, "project_dir": str(project_dir)}
 
 
 def apply_remediations(project_dir: Path, report: Optional[Dict] = None) -> List[str]:
@@ -119,6 +133,37 @@ def _resolve_import(from_file: Path, spec: str) -> bool:
         if candidate.is_file():
             return True
     return False
+
+
+def _check_php_includes(project_dir: Path):
+    """Detecta require/include a archivos inexistentes (ruta estática vía __DIR__).
+    Devuelve (issues, missing_refs) donde missing_refs son rutas relativas al
+    proyecto que deberían existir y no existen."""
+    issues: List[str] = []
+    missing_refs: List[str] = []
+    seen = set()
+    for php_file in project_dir.rglob("*.php"):
+        if "vendor" in php_file.parts or ".deep" in php_file.parts:
+            continue
+        try:
+            text = php_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for spec in _PHP_INCLUDE_RE.findall(text):
+            target = (php_file.parent / spec.lstrip("/")).resolve()
+            if target.is_file():
+                continue
+            try:
+                rel = str(target.relative_to(project_dir.resolve()))
+            except ValueError:
+                # referencia fuera del proyecto: no la regeneramos, solo avisamos
+                rel = None
+            src_rel = php_file.relative_to(project_dir)
+            issues.append(f"Referencia rota en {src_rel}: '{spec}' no existe")
+            if rel and rel not in seen:
+                seen.add(rel)
+                missing_refs.append(rel)
+    return issues, missing_refs
 
 
 def _check_docker_npm(project_dir: Path) -> List[str]:
