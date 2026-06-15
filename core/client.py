@@ -14,6 +14,19 @@ except ImportError:
     _HAS_REQUESTS = False
 
 
+# Tope DURO de tokens de salida de deepseek-chat / deepseek-reasoner.
+# Pedir más es inútil: la API recorta silenciosamente y la respuesta se trunca.
+MAX_OUTPUT_TOKENS = 8192
+
+# Mensaje que se inyecta para que el modelo retome una respuesta truncada.
+_CONTINUE_PROMPT = (
+    "Tu respuesta anterior se cortó por el límite de tokens. "
+    "Continuá EXACTAMENTE desde donde quedaste, sin repetir nada de lo ya escrito "
+    "y sin reabrir bloques o encabezados ya emitidos. Si un bloque de código quedó "
+    "abierto, seguí su contenido tal cual; cerrá los bloques al terminar."
+)
+
+
 class DeepSeekClient:
     def __init__(self, api_key: str = None, model: str = "deepseek-chat"):
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
@@ -24,9 +37,19 @@ class DeepSeekClient:
 
     def chat(self, prompt: str, system_prompt: str = None,
              temperature: float = 0.7, max_tokens: int = 2000,
-             model_override: str = None) -> Dict:
+             model_override: str = None, auto_continue: bool = False,
+             max_continuations: int = 4) -> Dict:
+        """Una llamada al modelo.
+
+        Si auto_continue=True y la respuesta se corta por límite de tokens
+        (finish_reason == 'length'), reenvía el contenido parcial y pide que lo
+        continúe, concatenando hasta que termine (o hasta max_continuations).
+        El resultado incluye 'truncated' y 'continuations'.
+        """
         model = model_override or self.model
-        _dbg.log("API_CALL", f"model={model}  temp={temperature}  max_tokens={max_tokens}")
+        max_tokens = min(max_tokens, MAX_OUTPUT_TOKENS)
+        _dbg.log("API_CALL", f"model={model}  temp={temperature}  max_tokens={max_tokens}  "
+                 f"auto_continue={auto_continue}")
         if system_prompt:
             _dbg.log_block("API_SYS", "system_prompt", system_prompt)
         _dbg.log_block("API_USER", "user_prompt", prompt)
@@ -35,6 +58,60 @@ class DeepSeekClient:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+
+        full_content = ""
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        finish_reason = None
+        continuations = 0
+
+        while True:
+            once = self._chat_once(messages, model, temperature, max_tokens)
+            if not once["success"]:
+                # Si ya teníamos contenido parcial, lo devolvemos marcado como truncado
+                # en vez de perderlo; si no, propagamos el error.
+                if full_content:
+                    return {
+                        "success": True, "content": full_content,
+                        "tokens": total_usage, "model": self.model,
+                        "truncated": True, "continuations": continuations,
+                        "error": once.get("error"),
+                    }
+                return {
+                    "success": False,
+                    "content": once.get("content", ""),
+                    "error": once.get("error"),
+                    "truncated": False, "continuations": continuations,
+                }
+
+            full_content += once["content"]
+            for k in total_usage:
+                total_usage[k] += once["usage"].get(k, 0) or 0
+            finish_reason = once["finish_reason"]
+
+            if (finish_reason != "length" or not auto_continue
+                    or continuations >= max_continuations):
+                break
+
+            continuations += 1
+            _dbg.log("API_CONT", f"finish_reason=length → continuación {continuations}/{max_continuations}")
+            messages.append({"role": "assistant", "content": once["content"]})
+            messages.append({"role": "user", "content": _CONTINUE_PROMPT})
+
+        truncated = finish_reason == "length"
+        if truncated:
+            _dbg.log("API_TRUNC", f"respuesta truncada tras {continuations} continuación(es)")
+        return {
+            "success": True,
+            "content": full_content,
+            "tokens": total_usage,
+            "model": self.model,
+            "truncated": truncated,
+            "continuations": continuations,
+        }
+
+    def _chat_once(self, messages: List[Dict], model: str,
+                   temperature: float, max_tokens: int) -> Dict:
+        """Una sola request con reintentos. Devuelve content + finish_reason + usage."""
         payload = {
             "model": model,
             "messages": messages,
@@ -47,9 +124,12 @@ class DeepSeekClient:
                 response = self._call_api(payload)
                 latency = time.time() - t0
                 usage = response.get("usage", {})
-                msg = response["choices"][0]["message"]
+                choice = response["choices"][0]
+                msg = choice["message"]
                 content = msg.get("content") or msg.get("reasoning_content", "")
+                finish_reason = choice.get("finish_reason")
                 _dbg.log("API_OK", f"attempt={attempt+1}  latency={latency:.2f}s  "
+                         f"finish={finish_reason}  "
                          f"tokens_in={usage.get('prompt_tokens','?')}  "
                          f"tokens_out={usage.get('completion_tokens','?')}  "
                          f"total={usage.get('total_tokens','?')}")
@@ -62,8 +142,8 @@ class DeepSeekClient:
                 return {
                     "success": True,
                     "content": content,
-                    "tokens": usage,
-                    "model": self.model,
+                    "finish_reason": finish_reason,
+                    "usage": usage,
                 }
             except Exception as e:
                 latency = time.time() - t0

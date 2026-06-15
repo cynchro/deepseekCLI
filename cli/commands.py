@@ -95,7 +95,16 @@ def run_build(task: str, api_key: str, output_dir: str,
 
     tokens = system.client.get_stats().get("total_tokens_used", 0)
     show_balance(api_key, label="Crédito después del build", before=before, tokens=tokens)
-    show_files(result.get("files_written", []))
+    if result.get("truncated"):
+        print("\n⚠️  La generación se truncó por el límite de tokens del modelo,")
+        print("   incluso tras las continuaciones automáticas. EL PROYECTO ESTÁ INCOMPLETO.")
+        print("   Sugerencias:")
+        print("     • Dividí el trabajo en módulos:  deep navigator --init")
+        print("     • O completá lo que falta:        deep fix")
+
+    show_files(result.get("files_written", []),
+               title="📄 Archivos escritos (parcial):" if result.get("truncated")
+               else "✅ Archivos creados:")
     show_evaluation(result)
     _show_postcheck(result)
 

@@ -80,9 +80,27 @@ class DeepSeekLearningSystem:
         success, outcome = self._evaluate(task, plan, execution, written_files, heuristics)
         _dbg.log("PHASE_4", f"success={success}  structural_ok={heuristics.get('structural_ok')}")
 
+        # Truncación: si la generación se cortó por límite de tokens, el proyecto está
+        # incompleto SÍ o SÍ (faltan los últimos archivos). No es negociable: fail honesto.
+        truncated = execution.get("truncated", False)
+        if truncated:
+            success = False
+            try:
+                ev = json.loads(outcome)
+            except Exception:
+                ev = {"raw": outcome}
+            ev["success"] = False
+            ev["truncated"] = True
+            note = ("La respuesta del modelo se truncó por límite de tokens tras agotar las "
+                    "continuaciones automáticas: faltan archivos. Reducí el alcance, dividí en "
+                    "módulos (deep navigator) o corré 'deep fix' para completar lo que falta.")
+            ev["issues"] = [note] + ev.get("issues", [])
+            outcome = json.dumps(ev)
+            _dbg.log("TRUNCATION", "generación incompleta — success forzado a False")
+
         # Override: si la heurística confirma estructura completa pero el LLM dice failure,
         # inyectar heuristic_override en el outcome para que review_and_fix sepa que no es crítico
-        if not success and heuristics.get("structural_ok"):
+        if not success and not truncated and heuristics.get("structural_ok"):
             try:
                 ev = json.loads(outcome)
                 ev["heuristic_override"] = True
@@ -141,6 +159,7 @@ class DeepSeekLearningSystem:
             "experience_count": len(self.memory.experiences),
             "postcheck": postcheck_report,
             "postcheck_fixes": postcheck_fixes,
+            "truncated": truncated,
         }
 
     def review_and_fix(self, task: str, result: Dict) -> Dict:
@@ -181,7 +200,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         response = self.client.chat(
             prompt,
             system_prompt=f"Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders. {lang}",
-            temperature=0.2, max_tokens=8000,
+            temperature=0.2, max_tokens=8192,
+            auto_continue=True, max_continuations=4,
         )
         if not response.get("success"):
             return {"success": False, "files_fixed": [], "error": response.get("content", "")}
@@ -263,7 +283,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 f"Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo. "
                 f"{lang}"
             ),
-            temperature=0.3, max_tokens=8000,
+            temperature=0.3, max_tokens=8192,
+            auto_continue=True, max_continuations=4,
         )
         if not response.get("success"):
             return {"success": False, "files_updated": [], "error": response.get("content", "")}
@@ -353,11 +374,18 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             "FORMATO: antes de cada bloque escribe ### archivo: ruta/archivo.ext\n"
             "Código completo y funcional. Sin '...' ni placeholders.",
             system_prompt=f"Eres un desarrollador senior. Código limpio, completo. Siempre indicás el nombre del archivo. {lang}",
-            temperature=0.3, max_tokens=12000,
+            temperature=0.3, max_tokens=8192,
+            auto_continue=True, max_continuations=6,
         )
         tokens = response.get("tokens", {}).get("total_tokens", 0)
-        _dbg.log("EXEC", f"response_success={response.get('success')}  tokens={tokens}")
-        return {"code": response["content"], "tokens_used": tokens}
+        truncated = response.get("truncated", False)
+        _dbg.log("EXEC", f"response_success={response.get('success')}  tokens={tokens}  "
+                 f"truncated={truncated}  continuations={response.get('continuations', 0)}")
+        return {
+            "code": response["content"],
+            "tokens_used": tokens,
+            "truncated": truncated,
+        }
 
     def _evaluate(self, task: str, plan: str, execution: Dict,
                   written_files: List[str] = None,
