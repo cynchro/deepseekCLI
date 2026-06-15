@@ -10,7 +10,8 @@ from core.config import get_language_instruction
 from core.memory import DeepSeekMemory
 from core.agent import ReflectiveAgent
 from core.writer import FileWriter
-from core.prompts import BUILD_COMPLETENESS, DOCKER_NPM, UPDATE_DOCKER_HINT
+from core.prompts import (BUILD_COMPLETENESS, DOCKER_NPM, UPDATE_DOCKER_HINT,
+                          MANIFEST_INSTRUCTIONS, FILE_GEN_INSTRUCTIONS)
 from core.postcheck import analyze_project, apply_remediations, merge_into_heuristics
 
 
@@ -41,8 +42,13 @@ class DeepSeekLearningSystem:
         lines = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(self.rules))
         return f"\nREGLAS OBLIGATORIAS (.deeprules):\n{lines}\n"
 
-    def execute_and_learn(self, task: str, plan: str = None) -> Dict:
-        _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}")
+    # Si el manifiesto supera este umbral, se genera archivo por archivo en vez
+    # de en una sola respuesta (que no entraría en el tope de tokens del modelo).
+    SINGLE_SHOT_MAX_FILES = 8
+
+    def execute_and_learn(self, task: str, plan: str = None,
+                          manifest: bool = False) -> Dict:
+        _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}  manifest={manifest}")
         _dbg.log("SYSTEM", f"model={self.client.model}  rules={len(self.rules)}")
 
         self._progress("FASE 1")
@@ -58,7 +64,7 @@ class DeepSeekLearningSystem:
 
         self._progress("FASE 2")
         _dbg.log("PHASE", "2 — ejecución / generación de código")
-        execution = self._execute(task, plan)
+        execution = self._execute(task, plan, manifest_mode=manifest)
         _dbg.log("PHASE_2", f"tokens_used={execution.get('tokens_used', 0)}  "
                  f"code_chars={len(execution.get('code', ''))}")
 
@@ -80,27 +86,38 @@ class DeepSeekLearningSystem:
         success, outcome = self._evaluate(task, plan, execution, written_files, heuristics)
         _dbg.log("PHASE_4", f"success={success}  structural_ok={heuristics.get('structural_ok')}")
 
-        # Truncación: si la generación se cortó por límite de tokens, el proyecto está
-        # incompleto SÍ o SÍ (faltan los últimos archivos). No es negociable: fail honesto.
+        # Incompletitud: si la generación se cortó por tokens, o el manifiesto declaró
+        # archivos que no se pudieron generar, el proyecto está incompleto. Fail honesto.
         truncated = execution.get("truncated", False)
-        if truncated:
+        missing_files = execution.get("missing_files", []) or []
+        if truncated or missing_files:
             success = False
             try:
                 ev = json.loads(outcome)
             except Exception:
                 ev = {"raw": outcome}
             ev["success"] = False
-            ev["truncated"] = True
-            note = ("La respuesta del modelo se truncó por límite de tokens tras agotar las "
-                    "continuaciones automáticas: faltan archivos. Reducí el alcance, dividí en "
-                    "módulos (deep navigator) o corré 'deep fix' para completar lo que falta.")
-            ev["issues"] = [note] + ev.get("issues", [])
+            ev["truncated"] = truncated
+            issues = []
+            if truncated:
+                issues.append(
+                    "La respuesta del modelo se truncó por límite de tokens tras agotar las "
+                    "continuaciones automáticas: faltan archivos.")
+            if missing_files:
+                ev["missing_files"] = missing_files
+                issues.append(
+                    f"{len(missing_files)} archivo(s) del manifiesto no se generaron: "
+                    f"{', '.join(missing_files[:8])}{'…' if len(missing_files) > 8 else ''}. "
+                    f"Corré 'deep fix' para completarlos.")
+            ev["issues"] = issues + ev.get("issues", [])
             outcome = json.dumps(ev)
-            _dbg.log("TRUNCATION", "generación incompleta — success forzado a False")
+            _dbg.log("INCOMPLETE", f"truncated={truncated}  missing={len(missing_files)} "
+                     "— success forzado a False")
 
         # Override: si la heurística confirma estructura completa pero el LLM dice failure,
         # inyectar heuristic_override en el outcome para que review_and_fix sepa que no es crítico
-        if not success and not truncated and heuristics.get("structural_ok"):
+        if (not success and not truncated and not missing_files
+                and heuristics.get("structural_ok")):
             try:
                 ev = json.loads(outcome)
                 ev["heuristic_override"] = True
@@ -160,6 +177,8 @@ class DeepSeekLearningSystem:
             "postcheck": postcheck_report,
             "postcheck_fixes": postcheck_fixes,
             "truncated": truncated,
+            "missing_files": missing_files,
+            "manifest": execution.get("manifest", []),
         }
 
     def review_and_fix(self, task: str, result: Dict) -> Dict:
@@ -361,7 +380,27 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         return response["content"]
 
-    def _execute(self, task: str, plan: str) -> Dict:
+    def _execute(self, task: str, plan: str, manifest_mode: bool = False) -> Dict:
+        """Genera el código. Con manifest_mode, primero pide el manifiesto de archivos
+        y, si el proyecto es grande, genera archivo por archivo (no se trunca)."""
+        if not manifest_mode:
+            return self._execute_single_shot(task, plan)
+
+        self._progress("MANIFIESTO")
+        files = self._build_manifest(task, plan)
+        _dbg.log("MANIFEST", f"files={len(files)}  paths={[f['path'] for f in files]}")
+
+        # Proyecto chico o manifiesto vacío → un solo tiro (con auto-continuación ya
+        # no se trunca y ahorramos N llamadas).
+        if len(files) <= self.SINGLE_SHOT_MAX_FILES:
+            _dbg.log("MANIFEST", f"≤{self.SINGLE_SHOT_MAX_FILES} archivos → single-shot")
+            out = self._execute_single_shot(task, plan)
+            out["manifest"] = [f["path"] for f in files]
+            return out
+
+        return self._execute_by_manifest(task, plan, files)
+
+    def _execute_single_shot(self, task: str, plan: str) -> Dict:
         lang = get_language_instruction()
         docker_extra = ""
         if any(w in task.lower() for w in ("docker", "dockerizar", "dockerize", "container", "compose")):
@@ -385,6 +424,97 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             "code": response["content"],
             "tokens_used": tokens,
             "truncated": truncated,
+        }
+
+    def _build_manifest(self, task: str, plan: str) -> List[Dict]:
+        """Pide al modelo la lista explícita de archivos a crear (JSON)."""
+        lang = get_language_instruction()
+        response = self.client.chat(
+            f"Tarea: {task}\n\nPlan:\n{plan}\n{self._rules_block()}\n{MANIFEST_INSTRUCTIONS}",
+            system_prompt=f"Eres un arquitecto de software. Respondés SOLO con JSON válido. {lang}",
+            temperature=0.2, max_tokens=4000, auto_continue=True, max_continuations=2,
+        )
+        raw = (response.get("content") or "").strip()
+        raw = re.sub(r"```json\n?|```\n?", "", raw).strip()
+        try:
+            data = json.loads(raw)
+            files = data.get("files", []) if isinstance(data, dict) else data
+        except Exception as e:
+            _dbg.log("MANIFEST", f"json_parse_failed={e}  raw={raw[:200]}")
+            return []
+
+        seen, clean = set(), []
+        for f in files:
+            if isinstance(f, str):
+                f = {"path": f, "purpose": ""}
+            path = str(f.get("path", "")).strip().lstrip("/")
+            if not path or path in seen or ".." in Path(path).parts:
+                continue
+            seen.add(path)
+            clean.append({"path": path, "purpose": str(f.get("purpose", "")).strip()})
+        return clean
+
+    def _generate_file(self, task: str, plan: str, manifest_paths: List[str],
+                       path: str, purpose: str) -> Tuple[str, bool, int]:
+        """Genera el contenido de un único archivo. Devuelve (contenido, truncado, tokens)."""
+        lang = get_language_instruction()
+        instr = FILE_GEN_INSTRUCTIONS.format(path=path, purpose=purpose or "(sin descripción)")
+        response = self.client.chat(
+            f"Tarea global: {task}\n\n"
+            f"Plan (resumen):\n{plan[:1800]}\n{self._rules_block()}\n"
+            f"Manifiesto del proyecto (todos los archivos que existen):\n"
+            + "\n".join(f"  - {p}" for p in manifest_paths)
+            + f"\n\n{instr}",
+            system_prompt=f"Eres un desarrollador senior. Generás un archivo completo y funcional. {lang}",
+            temperature=0.3, max_tokens=8192, auto_continue=True, max_continuations=4,
+        )
+        tokens = response.get("tokens", {}).get("total_tokens", 0)
+        if not response.get("success"):
+            return "", True, tokens
+        content = response["content"]
+        # Si el modelo igual usó el formato "### archivo:" o envolvió en fences, lo limpiamos.
+        blocks = self.file_writer._extract_named_blocks(content)
+        if blocks:
+            content = blocks[0][1]
+        else:
+            content = self.file_writer._strip_outer_fence(content)
+        return content.strip("\n"), response.get("truncated", False), tokens
+
+    def _execute_by_manifest(self, task: str, plan: str, files: List[Dict]) -> Dict:
+        """Genera el proyecto archivo por archivo según el manifiesto. No se trunca:
+        cada archivo es una llamada independiente (con auto-continuación)."""
+        manifest_paths = [f["path"] for f in files]
+        total = len(files)
+        parts, missing = [], []
+        tokens_total = 0
+        any_truncated = False
+
+        for idx, f in enumerate(files, 1):
+            path, purpose = f["path"], f["purpose"]
+            self._progress(f"GENERANDO {idx}/{total}  {path}")
+            content, truncated, tokens = self._generate_file(
+                task, plan, manifest_paths, path, purpose)
+            tokens_total += tokens
+            if not content.strip():
+                _dbg.log("MANIFEST", f"  ✗ {path} — generación vacía")
+                missing.append(path)
+                continue
+            if truncated:
+                any_truncated = True
+                _dbg.log("MANIFEST", f"  ⚠ {path} — truncado aun con continuaciones")
+            _dbg.log("MANIFEST", f"  ✓ {path}  ({len(content)} chars)")
+            # Formato que entiende el writer: "### archivo: ruta" + contenido crudo.
+            parts.append(f"### archivo: {path}\n{content}\n")
+
+        code = "\n".join(parts)
+        _dbg.log("EXEC", f"manifest mode: generated={len(parts)}/{total}  "
+                 f"missing={len(missing)}  truncated={any_truncated}")
+        return {
+            "code": code,
+            "tokens_used": tokens_total,
+            "truncated": any_truncated,
+            "missing_files": missing,
+            "manifest": manifest_paths,
         }
 
     def _evaluate(self, task: str, plan: str, execution: Dict,

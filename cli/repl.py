@@ -86,9 +86,10 @@ def _banner() -> str:
     )
 
 _HELP = """
-  build <tarea>          Genera un proyecto completo
+  build <tarea>          Genera un proyecto completo (manifiesto: archivo por archivo)
   build -t <archivo>     Carga la tarea desde un archivo de texto
   build <tarea> -f       Genera y corrige automáticamente si falla
+  build <tarea> --single-shot  Genera todo en una respuesta (legacy, proyectos chicos)
   build <tarea> --model deepseek-reasoner
   update <cambio>        Modifica el proyecto del directorio actual
   navigator              Un LLM navigator planifica (job.md), DeepSeek construye
@@ -239,12 +240,15 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             return True
         model = "deepseek-chat"
         auto_fix = False
+        single_shot = False
         task_file = None
         task_parts = []
         i = 0
         while i < len(args):
             if args[i] in ("-f", "--auto-fix"):
                 auto_fix = True
+            elif args[i] == "--single-shot":
+                single_shot = True
             elif args[i] == "--model" and i + 1 < len(args):
                 model = args[i + 1]
                 i += 1
@@ -275,6 +279,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             model=model, root_is_output_dir=False,
             rules=load_rules(Path.cwd() / ".deeprules"),
             verbose=False, auto_fix=auto_fix,
+            manifest=not single_shot,
         )
 
     elif cmd in ("navigator", "claudejob"):

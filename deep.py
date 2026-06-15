@@ -60,6 +60,10 @@ def _legacy(argv: list):
     p_build.add_argument("--model", default="deepseek-chat", metavar="MODELO")
     p_build.add_argument("-f", "--auto-fix", action="store_true",
                          help="Corregir automáticamente si la evaluación falla")
+    p_build.add_argument("--single-shot", action="store_true",
+                         help="Genera todo en una sola respuesta (legacy). Por defecto se "
+                              "usa el manifiesto: genera archivo por archivo y escala a "
+                              "proyectos grandes sin truncarse.")
     p_build.add_argument("-v", "--verbose", action="store_true")
 
     def do_build(args):
@@ -88,6 +92,7 @@ def _legacy(argv: list):
             rules=rules, verbose=args.verbose,
             auto_fix=getattr(args, "auto_fix", False),
             project_name=args.name,
+            manifest=not getattr(args, "single_shot", False),
         )
 
     p_build.set_defaults(func=do_build)

@@ -25,7 +25,8 @@ from core.postcheck import format_report
 def run_build(task: str, api_key: str, output_dir: str,
               model: str = "deepseek-chat", root_is_output_dir: bool = False,
               rules: List[str] = None, verbose: bool = False,
-              auto_fix: bool = False, project_name: str = "") -> Optional[dict]:
+              auto_fix: bool = False, project_name: str = "",
+              manifest: bool = True) -> Optional[dict]:
 
     if not project_name and not root_is_output_dir:
         from core.writer import FileWriter
@@ -39,6 +40,7 @@ def run_build(task: str, api_key: str, output_dir: str,
     print(f"\n🚀 Generando: {task}")
     print(f"📁 Proyecto:  {project_name}")
     print(f"📂 Destino:   {Path(output_dir).resolve()}")
+    print(f"⚙️  Modo:      {'manifiesto (archivo por archivo)' if manifest else 'single-shot'}")
     if rules:
         print(f"📏 Reglas:    {len(rules)} cargadas desde .deeprules")
 
@@ -71,7 +73,7 @@ def run_build(task: str, api_key: str, output_dir: str,
         spinner.start()
 
     try:
-        result = system.execute_and_learn(task)
+        result = system.execute_and_learn(task, manifest=manifest)
     except KeyboardInterrupt:
         if spinner:
             spinner.stop()
