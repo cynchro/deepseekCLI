@@ -212,6 +212,35 @@ class BuildModulePlanTests(unittest.TestCase):
             self.assertIn("truncado", exc)
 
 
+class GateModuleTests(unittest.TestCase):
+    def test_missing_declared_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "NoteController.php").write_text("<?php", encoding="utf-8")
+            mod = {"name": "http",
+                   "files": ["src/NoteController.php", "public/index.php"]}
+            gate = nav.gate_module(mod, [str(root / "src" / "NoteController.php")], root)
+            self.assertEqual(gate["missing"], ["public/index.php"])
+            self.assertFalse(gate["ok"])
+
+    def test_extra_file_is_flagged_as_invention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x=1", encoding="utf-8")
+            (root / "surprise.py").write_text("y=2", encoding="utf-8")
+            mod = {"name": "m", "files": ["a.py"]}
+            gate = nav.gate_module(
+                mod, [str(root / "a.py"), str(root / "surprise.py")], root)
+            self.assertEqual(gate["extra"], ["surprise.py"])
+            self.assertTrue(gate["ok"])  # extra es advertencia, no falla dura
+
+    def test_v1_module_without_files_is_not_gated(self):
+        gate = nav.gate_module({"name": "m", "files": []}, ["whatever.py"], Path("/tmp"))
+        self.assertTrue(gate["ok"])
+        self.assertEqual(gate["declared"], [])
+
+
 class RenderReviewTests(unittest.TestCase):
     def test_lists_built_files_and_flags_untracked(self):
         with tempfile.TemporaryDirectory() as tmp:

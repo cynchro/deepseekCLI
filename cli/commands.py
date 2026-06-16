@@ -465,8 +465,26 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
             })
             continue
 
+        # Gate: ¿construyó exactamente los archivos declarados en files:?
+        gate = nav.gate_module(mod, result.get("files_written", []), project_dir)
+        if gate["missing"]:
+            print(f"   ⚠️  faltan {len(gate['missing'])} archivo(s) declarado(s): "
+                  f"{', '.join(gate['missing'])}")
+            created = system.complete_missing(
+                task, plan, mod.get("files", []), gate["missing"], project_dir)
+            if created:
+                print(f"   🧩 {len(created)} archivo(s) completado(s) automáticamente")
+                result.setdefault("files_written", []).extend(created)
+                gate = nav.gate_module(mod, result["files_written"], project_dir)
+        if gate["extra"]:
+            print(f"   ⚠️  {len(gate['extra'])} archivo(s) no declarado(s) "
+                  f"(posible invención): {', '.join(gate['extra'][:5])}")
+        result["gate"] = gate
+
         nav.save_module_state(project_dir, mod["name"], result)
-        if result.get("success"):
+        if gate["missing"]:
+            print(f"   ❌ módulo incompleto — todavía faltan: {', '.join(gate['missing'])}")
+        elif result.get("success"):
             print(f"   ✅ módulo ok — {len(result.get('files_written', []))} archivo(s)")
         else:
             print("   ⚠️  el evaluador marcó observaciones")

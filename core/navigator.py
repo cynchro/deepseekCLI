@@ -197,6 +197,7 @@ def save_module_state(project_dir: Path, module: str, result: Dict) -> Path:
         "success": bool(result.get("success")),
         "files_written": result.get("files_written", []),
         "outcome": result.get("outcome", ""),
+        "gate": result.get("gate"),
         "timestamp": datetime.now().isoformat(),
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -299,6 +300,26 @@ def build_module_plan(job: Dict, mod: Dict, project_dir: Path) -> str:
     parts.append("\n".join(detail))
 
     return "\n\n".join(parts)
+
+
+# ── Gate: lo declarado (files:) vs lo construido ─────────────────────────────
+
+def gate_module(mod: Dict, files_written: List[str], project_dir: Path) -> Dict:
+    """Compara los `files:` declarados por el módulo contra lo que DeepSeek escribió.
+       missing → fuga (no cumplió el contrato);  extra → posible invención.
+    Si el módulo no declara files: (job v1), no hay nada que verificar."""
+    declared = {f.lstrip("/") for f in mod.get("files", [])}
+    if not declared:
+        return {"declared": [], "missing": [], "extra": [], "ok": True}
+    built = set(_relative_code_files(files_written, project_dir))
+    missing = sorted(d for d in declared if d not in built)
+    extra = sorted(b for b in built if b not in declared)
+    return {
+        "declared": sorted(declared),
+        "missing": missing,   # falla dura
+        "extra": extra,       # advertencia (invención)
+        "ok": not missing,
+    }
 
 
 # ── Render del review (lo que el usuario pasa al navigator) ──────────────────
