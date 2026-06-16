@@ -226,6 +226,81 @@ def load_all_states(project_dir: Path) -> List[Dict]:
     return states
 
 
+# ── Plan por módulo (lo que recibe DeepSeek al construir cada módulo) ─────────
+
+def _sibling_excerpts(job: Dict, mod: Dict, project_dir: Path,
+                      budget: int = 9000, per_file: int = 1200) -> str:
+    """Código real ya construido por OTROS módulos, para que DeepSeek use las APIs
+    que existen en vez de inventarlas. Agnóstico: inyecta el texto crudo (head),
+    sin parsear firmas. Prioriza los módulos listados en `uses:` y respeta un
+    presupuesto de caracteres."""
+    states = {s["module"]: s for s in load_all_states(project_dir)}
+    uses = {u.lower() for u in mod.get("uses", [])}
+
+    ordered = []
+    for m in job.get("modules", []):
+        if m["name"] == mod["name"] or m["name"] not in states:
+            continue
+        priority = 0 if m["name"].lower() in uses else 1
+        ordered.append((priority, states[m["name"]]))
+    ordered.sort(key=lambda x: x[0])
+
+    out, used = [], 0
+    for _, st in ordered:
+        for fp in st.get("files_written", []):
+            p = Path(fp)
+            if ".deep" in p.parts or p.name == "RESPONSE.md":
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+                rel = p.resolve().relative_to(Path(project_dir).resolve())
+            except (OSError, ValueError):
+                continue
+            snippet = text[:per_file]
+            if len(text) > per_file:
+                snippet += "\n# … (truncado) …"
+            block = f"### {rel}\n{snippet}"
+            if used + len(block) > budget:
+                return "\n\n".join(out)
+            out.append(block)
+            used += len(block)
+    return "\n\n".join(out)
+
+
+def build_module_plan(job: Dict, mod: Dict, project_dir: Path) -> str:
+    """Arma el plan que recibe DeepSeek para UN módulo: stack + plan global +
+    contratos compartidos + código ya construido + detalle estructurado del módulo.
+    DeepSeek no replanifica; solo construye contra este contrato."""
+    parts: List[str] = []
+    if job.get("stack"):
+        parts.append("## STACK (cerrado — no uses nada fuera de esto)\n" + job["stack"])
+    parts.append("## PLAN GENERAL (definido por el navigator)\n" + job.get("plan", ""))
+    if job.get("contracts"):
+        parts.append("## CONTRACTS (fuente de verdad — respetá estas firmas/esquemas EXACTAMENTE)\n"
+                     + job["contracts"])
+
+    siblings = _sibling_excerpts(job, mod, project_dir)
+    if siblings:
+        parts.append("## YA CONSTRUIDO POR OTROS MÓDULOS (usá estas APIs reales, NO las reinventes)\n"
+                     + siblings)
+
+    detail = [f"## MÓDULO A CONSTRUIR AHORA: {mod['name']}"]
+    if mod.get("files"):
+        detail.append("Archivos a crear (SOLO estos, ninguno más):\n"
+                      + "\n".join(f"- {f}" for f in mod["files"]))
+    if mod.get("uses"):
+        detail.append("Consume (de CONTRACTS u otros módulos):\n"
+                      + "\n".join(f"- {u}" for u in mod["uses"]))
+    if mod.get("done"):
+        detail.append("Terminado cuando:\n" + "\n".join(f"- {d}" for d in mod["done"]))
+    # Fallback v1: si el módulo no usa campos estructurados, mandamos su body crudo.
+    if not (mod.get("files") or mod.get("done")):
+        detail.append(mod.get("body", ""))
+    parts.append("\n".join(detail))
+
+    return "\n\n".join(parts)
+
+
 # ── Render del review (lo que el usuario pasa al navigator) ──────────────────
 
 def _relative_code_files(paths: List[str], project_dir: Path) -> List[str]:

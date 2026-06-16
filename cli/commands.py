@@ -443,12 +443,10 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
     for idx, mod in enumerate(job["modules"], 1):
         print(f"\n── [{idx}/{total}] módulo: {mod['name']} ──")
         task = f"{mod['name']}: {mod['body']}".strip()
-        # Plan inyectado = arquitectura global de Claude + detalle del módulo.
+        # Plan inyectado = stack + arquitectura global + contratos compartidos +
+        # código ya construido por otros módulos + detalle estructurado del módulo.
         # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
-        plan = (
-            f"PLAN GENERAL (definido por el navigator):\n{job['plan']}\n\n"
-            f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
-        )
+        plan = nav.build_module_plan(job, mod, project_dir)
         system = _make_system()
         try:
             result = system.execute_and_learn(task, plan=plan)

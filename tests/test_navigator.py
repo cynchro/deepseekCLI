@@ -167,6 +167,51 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("dependencias", joined)
 
 
+class BuildModulePlanTests(unittest.TestCase):
+    def test_plan_includes_stack_contracts_and_module_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            plan = nav.build_module_plan(job, http, root)
+            self.assertIn("STACK", plan)
+            self.assertIn("PHP 8.2", plan)
+            self.assertIn("CONTRACTS", plan)
+            self.assertIn("NoteRepository::find", plan)
+            self.assertIn("src/NoteController.php", plan)  # files: del módulo
+            self.assertIn("expone GET /notes", plan)        # done:
+
+    def test_plan_injects_already_built_sibling_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            repo_file = root / "src" / "NoteRepository.php"
+            repo_file.write_text("<?php\nclass NoteRepository { public function find($id){} }",
+                                 encoding="utf-8")
+            nav.save_module_state(root, "repo", {
+                "success": True, "files_written": [str(repo_file)]})
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            plan = nav.build_module_plan(job, http, root)
+            # el código real del módulo hermano ya construido aparece en el plan
+            self.assertIn("YA CONSTRUIDO POR OTROS MÓDULOS", plan)
+            self.assertIn("class NoteRepository", plan)
+
+    def test_sibling_excerpts_respect_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            big = root / "src" / "NoteRepository.php"
+            big.write_text("X" * 5000, encoding="utf-8")
+            nav.save_module_state(root, "repo", {
+                "success": True, "files_written": [str(big)]})
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            exc = nav._sibling_excerpts(job, http, root, budget=2000, per_file=800)
+            self.assertLessEqual(len(exc), 2000)
+            self.assertIn("truncado", exc)
+
+
 class RenderReviewTests(unittest.TestCase):
     def test_lists_built_files_and_flags_untracked(self):
         with tempfile.TemporaryDirectory() as tmp:
