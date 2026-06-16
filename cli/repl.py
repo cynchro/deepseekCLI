@@ -291,16 +291,19 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         force = "--force" in args
         fix_file = None
         job_file = None
+        review_module = None
         for i, a in enumerate(args):
             if a == "--fix" and i + 1 < len(args):
                 fix_file = args[i + 1]
             elif a in ("-j", "--job") and i + 1 < len(args):
                 job_file = args[i + 1]
+            elif a == "--module" and i + 1 < len(args):
+                review_module = args[i + 1]
         run_navigator(
             api_key=api_key, project_dir=Path.cwd(), job_file=job_file,
             rules=load_rules(Path.cwd() / ".deeprules"),
             init=init, review=review, fix_file=fix_file, auto_fix=auto_fix,
-            force=force,
+            force=force, review_module=review_module,
         )
 
     elif cmd == "skill":

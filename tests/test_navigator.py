@@ -261,6 +261,46 @@ class RenderReviewTests(unittest.TestCase):
             # RESPONSE.md no se cuenta como archivo de código
             self.assertNotIn("RESPONSE.md", out)
 
+    def test_embeds_real_code_for_web_architect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login():\n    return 'jwt'\n", encoding="utf-8")
+            nav.save_module_state(root, "auth", {
+                "success": True, "files_written": [str(root / "auth.py")]})
+            job = {"title": "demo", "modules": [{"name": "auth", "body": "- login"}]}
+            out = nav.render_review(root, job)
+            # el contenido real del archivo está embebido, no solo el nombre
+            self.assertIn("def login():", out)
+            self.assertIn("return 'jwt'", out)
+
+    def test_review_shows_gate_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x=1", encoding="utf-8")
+            nav.save_module_state(root, "m", {
+                "success": True, "files_written": [str(root / "a.py")],
+                "gate": {"declared": ["a.py", "b.py"], "missing": ["b.py"],
+                         "extra": [], "ok": False}})
+            job = {"title": "demo", "modules": [{"name": "m", "body": "x"}]}
+            out = nav.render_review(root, job)
+            self.assertIn("GATE", out)
+            self.assertIn("b.py", out)
+
+    def test_module_filter_scopes_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("AAA", encoding="utf-8")
+            (root / "b.py").write_text("BBB", encoding="utf-8")
+            nav.save_module_state(root, "ma", {"success": True, "files_written": [str(root / "a.py")]})
+            nav.save_module_state(root, "mb", {"success": True, "files_written": [str(root / "b.py")]})
+            job = {"title": "demo", "modules": [{"name": "ma", "body": "x"},
+                                                {"name": "mb", "body": "y"}]}
+            out = nav.render_review(root, job, module="ma")
+            self.assertIn("AAA", out)
+            self.assertNotIn("BBB", out)
+            # con filtro no se vuelca el inventario completo
+            self.assertNotIn("INVENTARIO", out.upper())
+
 
 class InitForceTests(unittest.TestCase):
     def test_init_creates_and_does_not_overwrite_without_force(self):

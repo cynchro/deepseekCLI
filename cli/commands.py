@@ -345,7 +345,8 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
                   model: str = "deepseek-chat", rules: List[str] = None,
                   init: bool = False, review: bool = False,
                   fix_file: Optional[str] = None, auto_fix: bool = False,
-                  force: bool = False, verbose: bool = False) -> None:
+                  force: bool = False, verbose: bool = False,
+                  review_module: Optional[str] = None) -> None:
     """El navigator planifica (job.md), DeepSeek construye y corrige.
 
     Modos:
@@ -381,9 +382,9 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
 
     job = nav.parse_job(job_path.read_text(encoding="utf-8"))
 
-    # ── --review: estado + formato para que Claude revise ────────────────────
+    # ── --review: código + estado + formato para que el arquitecto revise ────
     if review:
-        print(nav.render_review(project_dir, job))
+        print(nav.render_review(project_dir, job, module=review_module))
         return
 
     if job["errors"]:

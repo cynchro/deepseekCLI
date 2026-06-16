@@ -135,7 +135,9 @@ def _legacy(argv: list):
         p.add_argument("--force", action="store_true",
                        help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
         p.add_argument("--review", action="store_true",
-                       help="Vuelca estado + formato para que el navigator revise")
+                       help="Vuelca código + estado + formato para que el arquitecto revise")
+        p.add_argument("--module", metavar="NOMBRE", dest="review_module",
+                       help="Con --review, acota el volcado a un solo módulo")
         p.add_argument("--fix", metavar="REVIEW", dest="fix_file",
                        help="Aplica las correcciones del navigator desde un review.md")
         p.add_argument("-f", "--auto-fix", action="store_true",
@@ -151,6 +153,7 @@ def _legacy(argv: list):
             rules=load_rules(Path.cwd() / ".deeprules", project_dir / ".deeprules"),
             init=args.init, review=args.review, fix_file=args.fix_file,
             auto_fix=getattr(args, "auto_fix", False), force=args.force,
+            review_module=getattr(args, "review_module", None),
         )
 
     p_nav = sub.add_parser(

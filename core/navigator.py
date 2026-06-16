@@ -359,11 +359,38 @@ def _files_on_disk(project_dir: Path) -> List[str]:
     return sorted(files)
 
 
-def render_review(project_dir: Path, job: Dict) -> str:
-    """Genera el texto que el usuario pasa al navigator para que revise el proyecto.
-    Muestra, por módulo, lo PEDIDO (TASKS) frente a los archivos que DeepSeek
-    construyó, más el inventario completo en disco — para detectar invención
-    (archivos o dependencias que nadie pidió). El navigator lee los archivos directamente."""
+def _fence_lang(path: str) -> str:
+    return Path(path).suffix.lstrip(".") or ""
+
+
+def _embed_code(rel_paths: List[str], project_dir: Path, per_file: int,
+                budget: List[int]) -> List[str]:
+    """Embebe el contenido (head) de cada archivo en bloques markdown, respetando
+    un presupuesto compartido (budget es [restante], mutable)."""
+    out = []
+    for rel in rel_paths:
+        if budget[0] <= 0:
+            out.append("_(… resto omitido por tamaño; revisá por módulo con `--module <nombre>`)_")
+            break
+        p = Path(project_dir) / rel
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        snippet = text[:per_file]
+        if len(text) > per_file:
+            snippet += "\n… (truncado) …"
+        budget[0] -= len(snippet)
+        out.append(f"#### {rel}\n```{_fence_lang(rel)}\n{snippet}\n```")
+    return out
+
+
+def render_review(project_dir: Path, job: Dict, module: Optional[str] = None,
+                  per_file: int = 2500, budget: int = 60000) -> str:
+    """Texto que el usuario pasa al arquitecto externo. Embebe el CÓDIGO real
+    construido (no solo nombres) para que una IA sin acceso al disco pueda revisar,
+    junto al pedido (TASKS), el resultado del gate y el inventario. `module` acota
+    a un solo módulo (útil para no pasar un texto gigante)."""
     project_dir = Path(project_dir)
     states = {s["module"]: s for s in load_all_states(project_dir)}
     on_disk = _files_on_disk(project_dir)
@@ -372,13 +399,18 @@ def render_review(project_dir: Path, job: Dict) -> str:
         tracked.update(_relative_code_files(st.get("files_written", []), project_dir))
     untracked = [f for f in on_disk if f not in tracked]
 
+    modules = job.get("modules", [])
+    if module:
+        modules = [m for m in modules if m["name"] == module]
+
     lines = [
         f"# REVIEW REQUEST: {job.get('title', 'job')}",
         "",
-        "Sos el navigator (el arquitecto del proyecto). Revisá lo que construyó DeepSeek en este directorio",
-        "(podés leer los archivos directamente). Buscá:",
+        "Sos el arquitecto del proyecto. Abajo está el CÓDIGO que construyó DeepSeek",
+        "(el constructor). Revisá contra lo pedido y buscá:",
         "- problemas de ARQUITECTURA y diseño (no de sintaxis, de eso se encarga DeepSeek);",
-        "- INVENCIÓN: archivos, dependencias o comportamiento que NO pediste en TASKS.",
+        "- INVENCIÓN: archivos, dependencias o comportamiento que NO se pidieron;",
+        "- CRUCES rotos: llamadas/imports que no coinciden con lo que otro módulo expone.",
         "",
         "Devolvé SOLO un bloque con este formato, un `### <módulo>` por cada módulo a corregir:",
         "",
@@ -389,30 +421,56 @@ def render_review(project_dir: Path, job: Dict) -> str:
         "```",
         "",
         "Si un módulo está bien, no lo incluyas.",
-        "",
-        "## MÓDULOS — pedido vs. construido",
     ]
-    if not job.get("modules"):
-        lines.append("(el job no tiene módulos)")
-    for mod in job.get("modules", []):
+
+    if job.get("contracts"):
+        lines += ["", "## CONTRACTS (lo que los módulos deben respetar)", job["contracts"]]
+
+    lines += ["", "## MÓDULOS — pedido vs. construido"]
+    if not modules:
+        lines.append("(sin módulos que mostrar)")
+
+    remaining = [budget]
+    for mod in modules:
         st = states.get(mod["name"])
         lines.append(f"### {mod['name']}")
         lines.append("**Pedido (TASKS):**")
-        lines.append(mod["body"] or "(sin detalle)")
-        if st:
-            flag = "ok" if st.get("success") else "revisar"
-            built = _relative_code_files(st.get("files_written", []), project_dir)
-            lines.append(f"**Construido por DeepSeek — {flag}:**")
-            lines.extend(f"- {f}" for f in built) if built else lines.append("- (ningún archivo)")
+        if mod.get("files") or mod.get("done"):
+            if mod.get("files"):
+                lines.append("files: " + ", ".join(mod["files"]))
+            if mod.get("uses"):
+                lines.append("uses: " + ", ".join(mod["uses"]))
+            for d in mod.get("done", []):
+                lines.append(f"- {d}")
         else:
+            lines.append(mod.get("body") or "(sin detalle)")
+
+        if not st:
             lines.append("_(módulo todavía no construido)_")
+            lines.append("")
+            continue
+
+        gate = st.get("gate") or {}
+        if gate.get("missing"):
+            lines.append(f"**⚠️ GATE — faltan archivos declarados:** {', '.join(gate['missing'])}")
+        if gate.get("extra"):
+            lines.append(f"**⚠️ GATE — archivos no declarados (posible invención):** {', '.join(gate['extra'])}")
+
+        flag = "ok" if st.get("success") else "revisar"
+        built = _relative_code_files(st.get("files_written", []), project_dir)
+        lines.append(f"**Construido por DeepSeek — {flag}:**")
+        if built:
+            lines.extend(_embed_code(built, project_dir, per_file, remaining))
+        else:
+            lines.append("- (ningún archivo)")
         lines.append("")
 
-    lines.append("## ARCHIVOS EN DISCO (inventario completo)")
-    lines.extend(f"- {f}" for f in on_disk) if on_disk else lines.append("(vacío)")
-    if untracked:
-        lines.append("")
-        lines.append("## ⚠️ ARCHIVOS NO ATRIBUIDOS A NINGÚN MÓDULO")
-        lines.append("(aparecieron en disco pero ningún módulo los registró — revisá si son invención)")
-        lines.extend(f"- {f}" for f in untracked)
+    if not module:
+        lines.append("## ARCHIVOS EN DISCO (inventario completo)")
+        lines.extend(f"- {f}" for f in on_disk) if on_disk else lines.append("(vacío)")
+        if untracked:
+            lines.append("")
+            lines.append("## ⚠️ ARCHIVOS NO ATRIBUIDOS A NINGÚN MÓDULO")
+            lines.append("(aparecieron en disco pero ningún módulo los registró — revisá si son invención)")
+            lines.extend(f"- {f}" for f in untracked)
     return "\n".join(lines)
