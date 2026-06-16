@@ -1,3 +1,4 @@
+import json
 import re
 from collections import defaultdict
 from datetime import datetime
@@ -28,6 +29,37 @@ class FileWriter:
         self.last_project_dir: Optional[Path] = None
         self._on_file = on_file or (lambda p: None)
         self.project_name = project_name.strip()
+
+    def init_project_dir(self, task: str) -> Path:
+        """Crea/resuelve el directorio del proyecto sin escribir archivos."""
+        project_dir = self._make_project_dir(task)
+        self.last_project_dir = project_dir
+        (project_dir / ".deep").mkdir(parents=True, exist_ok=True)
+        return project_dir
+
+    def write_file(self, project_dir: Path, relative_path: str, code: str) -> Path:
+        """Escribe un único archivo en el proyecto."""
+        filepath = self._write_file(project_dir, relative_path, code)
+        return filepath
+
+    def save_plan(self, project_dir: Path, plan: dict) -> None:
+        deep_dir = project_dir / ".deep"
+        deep_dir.mkdir(parents=True, exist_ok=True)
+        (deep_dir / "plan.json").write_text(
+            json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    def save_build_log(self, project_dir: Path, log_text: str) -> None:
+        deep_dir = project_dir / ".deep"
+        deep_dir.mkdir(parents=True, exist_ok=True)
+        (deep_dir / "BUILD_LOG.md").write_text(log_text, encoding="utf-8")
+
+    def save_build_state(self, project_dir: Path, state: dict) -> None:
+        deep_dir = project_dir / ".deep"
+        deep_dir.mkdir(parents=True, exist_ok=True)
+        (deep_dir / "build_state.json").write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
     def write_from_response(self, content: str, task: str) -> List[str]:
         project_dir = self._make_project_dir(task)

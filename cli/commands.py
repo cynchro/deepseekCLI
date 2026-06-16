@@ -35,6 +35,7 @@ def run_build(task: str, api_key: str, output_dir: str,
     print(f"\n🚀 Generando: {task}")
     print(f"📁 Proyecto:  {project_name}")
     print(f"📂 Destino:   {Path(output_dir).resolve()}")
+    print(f"⚙️  Modo:      agente adaptativo (re-plan + memoria intra-build)")
     if rules:
         print(f"📏 Reglas:    {len(rules)} cargadas desde .deeprules")
 
@@ -646,9 +647,21 @@ def run_show(project_dir: Path) -> None:
     plan = ctx.get("plan", "")
     if plan:
         print("\n  📐 Plan:\n")
-        for line in plan[:600].split("\n"):
-            if line.strip():
-                print(f"     {line}")
+        if isinstance(plan, dict):
+            arch = plan.get("architecture", "")
+            if arch:
+                for line in arch[:600].split("\n"):
+                    if line.strip():
+                        print(f"     {line}")
+            files = plan.get("files", [])
+            if files:
+                print(f"\n     Archivos planificados ({len(files)}):")
+                for f in files[:12]:
+                    print(f"       - {f.get('path', '?')}")
+        else:
+            for line in str(plan)[:600].split("\n"):
+                if line.strip():
+                    print(f"     {line}")
 
     files = sorted(
         f for f in project_dir.rglob("*")
