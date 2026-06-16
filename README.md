@@ -105,7 +105,16 @@ deep build -t tarea.txt                          # carga la descripción desde u
 deep build "app Flask con SQLite" -f              # corrige automáticamente si falla
 deep build "landing page en HTML/CSS" -o ~/dir   # especifica directorio de salida
 deep build "compilador de expresiones" --model deepseek-reasoner
+deep build "script corto" --single-shot          # genera todo en una sola respuesta (legacy)
 ```
+
+> **Generación por manifiesto (por defecto).** `build` primero le pide al modelo
+> la lista de archivos del proyecto y, si son más de unos pocos, los genera
+> **uno por uno** — así un proyecto grande no se trunca por el límite de tokens.
+> Los proyectos chicos se generan en una sola respuesta. Si la respuesta igual
+> se corta, `deep` la **continúa automáticamente**; y si al final falta algún
+> archivo declarado, lo reporta (podés completarlo con `deep fix`). Usá
+> `--single-shot` para volver al modo de una sola respuesta.
 
 También podés combinar `-t` con otras opciones:
 
@@ -183,7 +192,7 @@ Modifica los archivos del proyecto en el directorio actual sin tener que regener
 deep fix
 ```
 
-Usa el contexto guardado en `.deep/` para corregir el proyecto sin necesidad de volver a describir la tarea.
+Usa el contexto guardado en `.deep/` para corregir el proyecto sin necesidad de volver a describir la tarea. Además de corregir problemas de calidad, **completa lo que falte**: archivos del manifiesto que no se hayan generado y archivos referenciados por el código que no existen en disco (imports/includes rotos). Estos últimos se detectan con un registro de detectores por lenguaje (TS/TSX y PHP de fábrica, extensible a otros).
 
 ---
 
@@ -455,6 +464,9 @@ Los bloques de texto largo (prompts, respuestas) se muestran indentados:
 | `EVAL` | JSON de evaluación parseado (score, issues, positives) |
 | `WRITER` | Directorio del proyecto, bloques detectados, cada archivo |
 | `EXEC` | Tokens usados en la fase de ejecución |
+| `MANIFEST` | Manifiesto de archivos y generación por archivo (modo build grande) |
+| `API_CONT` | Continuación automática tras una respuesta truncada por tokens |
+| `NAVIGATOR` | Build/fix por módulo y tracebacks de los módulos que fallan |
 | `FIX` | Flujo de corrección automática (`fix`, `build -f`) |
 | `UPDATE` | Flujo de modificación de proyecto existente |
 | `SYSTEM` | Resumen final del ciclo completo |
@@ -594,14 +606,22 @@ Hay ejemplos listos para usar en [`examples/skills/`](examples/skills/).
 
 ### El archivo `job.md`
 
-Hay **un solo archivo fuente de verdad**, que escribe el navigator: `.deep/job.md`. Tiene cuatro secciones (los nombres no distinguen mayúsculas):
+Hay **un solo archivo fuente de verdad**, que escribe el navigator: `.deep/job.md`. Los nombres de sección no distinguen mayúsculas:
 
 ```markdown
 # JOB: SaaS inmobiliario
 
+## STACK
+- lenguaje: Python 3.12
+- dependencias: fastapi, sqlalchemy, psycopg2  (ninguna otra)
+
 ## PLAN
 Backend en FastAPI con repository pattern. Auth con JWT.
 Controllers finos, lógica en servicios.
+
+## CONTRACTS
+PropertyRepository.find(id: int) -> Property | None
+ruta POST /auth/login -> {token: str}
 
 ## RULES
 - usar PostgreSQL, nunca SQLite
@@ -609,19 +629,31 @@ Controllers finos, lógica en servicios.
 
 ## TASKS
 ### auth
-- login y register
-- middleware JWT
+files:
+- app/auth/controller.py
+- app/auth/service.py
+uses:
+- (ninguno)
+done:
+- login y register con JWT
 
 ### properties
-- CRUD de propiedades
-- filtros por zona y precio
+files:
+- app/properties/controller.py
+- app/properties/repository.py
+uses:
+- PropertyRepository
+done:
+- CRUD + filtros por zona y precio
 ```
 
+- **`## STACK`** → lenguaje, versión y dependencias permitidas. **Cerrado**: DeepSeek no usa nada que no esté acá.
 - **`## PLAN`** → la arquitectura general. DeepSeek la usa como plan y **no vuelve a planificar**.
+- **`## CONTRACTS`** → interfaces, firmas y esquemas **compartidos entre módulos**. Se inyecta en **cada** módulo como fuente de verdad, para que los cruces cierren y nadie invente.
 - **`## RULES`** → restricciones (se combinan con tu `.deeprules` si existe). `--init` ya trae reglas **anti-invención** por defecto (no agregar dependencias ni archivos no pedidos, marcar TODO en vez de inventar).
-- **`## TASKS`** → un `### <módulo>` por cada pieza. DeepSeek construye **uno por uno**.
+- **`## TASKS`** → un `### <módulo>` por cada pieza, con `files:` (rutas exactas a crear), `uses:` (qué consume de CONTRACTS u otros módulos) y `done:` (criterio de terminado). DeepSeek construye **uno por uno**.
 
-> **Sobre fidelidad / invención:** ningún plan elimina al 100% que DeepSeek invente, porque debe completar lo que el plan no especifica. Dos cosas lo reducen: (1) cuanto más concretos sean los `TASKS` (rutas de archivo, firmas, dependencias, esquemas), menos margen de invención; (2) el loop `--review` / `--fix` es la red de seguridad — el navigator lee el output real y corrige lo que se desvió.
+> **Cómo se reduce la invención:** (1) el contrato fuerte (STACK + CONTRACTS + `files:`/`uses:`/`done:`) deja poco margen de interpretación; (2) al construir cada módulo, DeepSeek recibe el **código real de los módulos ya construidos**, así no reinventa sus APIs; (3) un **gate automático** compara lo declarado en `files:` con lo construido —completa lo que falte y marca lo no declarado como posible invención—; (4) el loop `--review` / `--fix` es la red de seguridad final. El formato v1 (módulos con bullets sueltos, sin `files:`) **sigue funcionando**: si no declarás `files:`, simplemente no hay gate para ese módulo.
 
 ### Flujo completo
 
@@ -646,7 +678,7 @@ El paso 3 lo hacés vos por fuera. `deep` **nunca llama a la API del navigator**
 
 ### Correcciones
 
-`deep navigator --review` no corrige nada: vuelca, por cada módulo, **lo que pediste en `TASKS` frente a los archivos que DeepSeek construyó**, más el inventario completo en disco — incluyendo una sección de archivos **no atribuidos a ningún módulo** para detectar invención de un vistazo. También incluye el **formato exacto** que el navigator tiene que devolver. El LLM lee los archivos del proyecto y escribe sus correcciones en un `review.md`:
+`deep navigator --review` no corrige nada: vuelca, por cada módulo, **lo que pediste en `TASKS`, el resultado del gate, y el código real que DeepSeek construyó embebido** (no solo los nombres), más el inventario completo en disco — incluyendo una sección de archivos **no atribuidos a ningún módulo** para detectar invención de un vistazo. Al embeber el código, **un arquitecto que no tiene acceso a tu disco** (una IA en una pestaña del navegador) puede revisar de verdad. También incluye el **formato exacto** que el navigator tiene que devolver. Con `--module <nombre>` acotás el volcado a un solo módulo (útil para no pegar un texto enorme). El navigator escribe sus correcciones en un `review.md`:
 
 ```markdown
 ## CORRECTIONS
@@ -669,7 +701,8 @@ deep navigator --init                    # crea la plantilla .deep/job.md
 deep navigator --init --force            # regenera la plantilla (guarda copia .bak)
 deep navigator                           # construye todos los módulos
 deep navigator -f                        # corrige automáticamente los módulos que fallen el build
-deep navigator --review                  # vuelca estado + formato para el navigator
+deep navigator --review                  # vuelca código + estado + formato para el navigator
+deep navigator --review --module auth    # acota el volcado a un solo módulo
 deep navigator --fix review.md           # aplica correcciones del navigator
 deep navigator --model deepseek-reasoner # construye con el modelo de razonamiento
 deep navigator -j ruta/job.md -o ~/proy  # job y directorio de salida personalizados
@@ -698,12 +731,12 @@ Cada proyecto generado incluye una carpeta `.deep/` con metadatos:
 ```
 mi-proyecto/
 ├── .deep/
-│   ├── context.json      # tarea, modelo y plan usado
+│   ├── context.json      # tarea, modelo, plan y manifiesto usado
 │   ├── evaluation.json   # resultado de la evaluación
 │   ├── RESPONSE.md       # respuesta completa del modelo
-│   ├── job.md            # (plan) plan que escribió el navigator
-│   └── plan/
-│       └── state/        # (plan) estado de cada módulo construido
+│   ├── job.md            # (navigator) plan que escribió el navigator
+│   └── navigator/
+│       └── state/        # (navigator) estado de cada módulo construido
 └── ... archivos del proyecto
 ```
 

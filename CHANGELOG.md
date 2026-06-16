@@ -8,6 +8,30 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
+- **Generación por manifiesto en `deep build`.** Antes de escribir, el modelo
+  devuelve la lista de archivos del proyecto (manifiesto). Si son más de 8, se
+  generan **uno por uno** (cada archivo es una llamada independiente), lo que
+  permite construir proyectos grandes sin que la respuesta se trunque. Los
+  proyectos chicos siguen en una sola respuesta. Flag `--single-shot` para
+  forzar el modo anterior.
+- **Auto-continuación ante truncación.** Si una respuesta se corta por el límite
+  de tokens (`finish_reason=length`), `deep` reenvía el contenido parcial y pide
+  continuar hasta terminar. Aplica a build, fix y update.
+- **`deep fix` completa lo que falta.** Detecta referencias rotas
+  (imports/includes a archivos inexistentes) mediante un **registro extensible de
+  detectores por lenguaje** (TS/TSX y PHP de fábrica) y **autogenera** los
+  archivos faltantes —además de los declarados en el manifiesto que no se hayan
+  creado— en vez de solo reportarlos.
+- **navigator v2 — contrato fuerte.** El `job.md` suma `## STACK` (deps
+  permitidas) y `## CONTRACTS` (firmas/esquemas compartidos), y cada módulo de
+  `## TASKS` admite campos estructurados `files:` / `uses:` / `done:`. Al
+  construir, cada módulo recibe el contrato **más el código real de los módulos
+  ya construidos**, para que DeepSeek no reinvente APIs entre módulos. Un **gate
+  automático** verifica que se hayan creado exactamente los archivos declarados
+  (faltante → se autocompleta; no declarado → se marca como posible invención).
+  `deep navigator --review` ahora **embebe el código** (no solo nombres) para que
+  un arquitecto sin acceso al disco pueda revisar; `--module <nombre>` acota el
+  volcado a un módulo.
 - **`deep navigator`** — flujo opcional donde un LLM navigator externo (Claude,
   ChatGPT, Gemini, etc.) planifica y DeepSeek construye y corrige. Un solo archivo
   fuente (`.deep/job.md`) con secciones `PLAN`/`RULES`/`TASKS`; DeepSeek construye
@@ -20,6 +44,12 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 - `config set-lang` — idioma preferido de las respuestas, persistido.
 
 ### Changed
+- **`max_tokens` se limita al tope real del modelo (8192).** Antes se pedían
+  12000, que la API recortaba en silencio. Combinado con la auto-continuación, el
+  build deja de cortarse a mitad.
+- **Reporte honesto de completitud.** Si la generación queda truncada o faltan
+  archivos del manifiesto, el resultado se marca como fallido (antes podía
+  reportar "✅ código aprobado" sobre un proyecto incompleto).
 - **`deep claudejob` → `deep navigator`.** El comando se renombró porque el LLM
   navigator no tiene por qué ser Claude (cualquier modelo puede llenar el
   `job.md`). `claudejob` sigue funcionando como **alias deprecado** (oculto del
@@ -27,6 +57,11 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   `.deep/navigator/`, y el módulo interno de `core/claudejob.py` a `core/navigator.py`.
 
 ### Fixed
+- **Truncación silenciosa del `build`.** El proyecto entero se generaba en una
+  sola llamada por encima del tope de tokens; la respuesta se cortaba a mitad
+  (dejando archivos sin escribir) pero el CLI reportaba éxito porque nunca leía
+  `finish_reason`. Ahora se detecta, se continúa automáticamente y, si aún queda
+  incompleto, se reporta como tal.
 - **`deep navigator` no dejaba rastro de los errores por módulo.** Las excepciones del
   loop de build/fix solo se imprimían y se descartaban con `continue` — ni con
   `--debug` quedaban en `debug.log`. Ahora se registra el traceback completo (tag
