@@ -60,6 +60,10 @@ def _legacy(argv: list):
     p_build.add_argument("--model", default="deepseek-chat", metavar="MODELO")
     p_build.add_argument("-f", "--auto-fix", action="store_true",
                          help="Corregir automáticamente si la evaluación falla")
+    p_build.add_argument("--single-shot", action="store_true",
+                         help="Genera todo en una sola respuesta (legacy). Por defecto se "
+                              "usa el manifiesto: genera archivo por archivo y escala a "
+                              "proyectos grandes sin truncarse.")
     p_build.add_argument("-v", "--verbose", action="store_true")
 
     def do_build(args):
@@ -88,6 +92,7 @@ def _legacy(argv: list):
             rules=rules, verbose=args.verbose,
             auto_fix=getattr(args, "auto_fix", False),
             project_name=args.name,
+            manifest=not getattr(args, "single_shot", False),
         )
 
     p_build.set_defaults(func=do_build)
@@ -130,7 +135,9 @@ def _legacy(argv: list):
         p.add_argument("--force", action="store_true",
                        help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
         p.add_argument("--review", action="store_true",
-                       help="Vuelca estado + formato para que el navigator revise")
+                       help="Vuelca código + estado + formato para que el arquitecto revise")
+        p.add_argument("--module", metavar="NOMBRE", dest="review_module",
+                       help="Con --review, acota el volcado a un solo módulo")
         p.add_argument("--fix", metavar="REVIEW", dest="fix_file",
                        help="Aplica las correcciones del navigator desde un review.md")
         p.add_argument("-f", "--auto-fix", action="store_true",
@@ -146,6 +153,7 @@ def _legacy(argv: list):
             rules=load_rules(Path.cwd() / ".deeprules", project_dir / ".deeprules"),
             init=args.init, review=args.review, fix_file=args.fix_file,
             auto_fix=getattr(args, "auto_fix", False), force=args.force,
+            review_module=getattr(args, "review_module", None),
         )
 
     p_nav = sub.add_parser(

@@ -10,7 +10,8 @@ from core.config import get_language_instruction
 from core.memory import DeepSeekMemory
 from core.agent import ReflectiveAgent
 from core.writer import FileWriter
-from core.prompts import BUILD_COMPLETENESS, DOCKER_NPM, UPDATE_DOCKER_HINT
+from core.prompts import (BUILD_COMPLETENESS, DOCKER_NPM, UPDATE_DOCKER_HINT,
+                          MANIFEST_INSTRUCTIONS, FILE_GEN_INSTRUCTIONS)
 from core.postcheck import analyze_project, apply_remediations, merge_into_heuristics
 
 
@@ -41,8 +42,13 @@ class DeepSeekLearningSystem:
         lines = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(self.rules))
         return f"\nREGLAS OBLIGATORIAS (.deeprules):\n{lines}\n"
 
-    def execute_and_learn(self, task: str, plan: str = None) -> Dict:
-        _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}")
+    # Si el manifiesto supera este umbral, se genera archivo por archivo en vez
+    # de en una sola respuesta (que no entraría en el tope de tokens del modelo).
+    SINGLE_SHOT_MAX_FILES = 8
+
+    def execute_and_learn(self, task: str, plan: str = None,
+                          manifest: bool = False) -> Dict:
+        _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}  manifest={manifest}")
         _dbg.log("SYSTEM", f"model={self.client.model}  rules={len(self.rules)}")
 
         self._progress("FASE 1")
@@ -58,7 +64,7 @@ class DeepSeekLearningSystem:
 
         self._progress("FASE 2")
         _dbg.log("PHASE", "2 — ejecución / generación de código")
-        execution = self._execute(task, plan)
+        execution = self._execute(task, plan, manifest_mode=manifest)
         _dbg.log("PHASE_2", f"tokens_used={execution.get('tokens_used', 0)}  "
                  f"code_chars={len(execution.get('code', ''))}")
 
@@ -80,9 +86,38 @@ class DeepSeekLearningSystem:
         success, outcome = self._evaluate(task, plan, execution, written_files, heuristics)
         _dbg.log("PHASE_4", f"success={success}  structural_ok={heuristics.get('structural_ok')}")
 
+        # Incompletitud: si la generación se cortó por tokens, o el manifiesto declaró
+        # archivos que no se pudieron generar, el proyecto está incompleto. Fail honesto.
+        truncated = execution.get("truncated", False)
+        missing_files = execution.get("missing_files", []) or []
+        if truncated or missing_files:
+            success = False
+            try:
+                ev = json.loads(outcome)
+            except Exception:
+                ev = {"raw": outcome}
+            ev["success"] = False
+            ev["truncated"] = truncated
+            issues = []
+            if truncated:
+                issues.append(
+                    "La respuesta del modelo se truncó por límite de tokens tras agotar las "
+                    "continuaciones automáticas: faltan archivos.")
+            if missing_files:
+                ev["missing_files"] = missing_files
+                issues.append(
+                    f"{len(missing_files)} archivo(s) del manifiesto no se generaron: "
+                    f"{', '.join(missing_files[:8])}{'…' if len(missing_files) > 8 else ''}. "
+                    f"Corré 'deep fix' para completarlos.")
+            ev["issues"] = issues + ev.get("issues", [])
+            outcome = json.dumps(ev)
+            _dbg.log("INCOMPLETE", f"truncated={truncated}  missing={len(missing_files)} "
+                     "— success forzado a False")
+
         # Override: si la heurística confirma estructura completa pero el LLM dice failure,
         # inyectar heuristic_override en el outcome para que review_and_fix sepa que no es crítico
-        if not success and heuristics.get("structural_ok"):
+        if (not success and not truncated and not missing_files
+                and heuristics.get("structural_ok")):
             try:
                 ev = json.loads(outcome)
                 ev["heuristic_override"] = True
@@ -130,7 +165,8 @@ class DeepSeekLearningSystem:
                 patterns = self.memory.extract_patterns(self.memory.experiences)
 
         if self.file_writer.last_project_dir:
-            self._persist_context(task, plan, success, outcome)
+            self._persist_context(task, plan, success, outcome,
+                                  manifest=execution.get("manifest", []))
 
         _dbg.log("SYSTEM", f"execute_and_learn DONE  success={success}  "
                  f"files={len(written_files)}  experiences={len(self.memory.experiences)}")
@@ -141,6 +177,9 @@ class DeepSeekLearningSystem:
             "experience_count": len(self.memory.experiences),
             "postcheck": postcheck_report,
             "postcheck_fixes": postcheck_fixes,
+            "truncated": truncated,
+            "missing_files": missing_files,
+            "manifest": execution.get("manifest", []),
         }
 
     def review_and_fix(self, task: str, result: Dict) -> Dict:
@@ -153,21 +192,50 @@ class DeepSeekLearningSystem:
             ev = json.loads(result.get("outcome", "{}"))
             issues, suggestions = ev.get("issues", []), ev.get("suggestions", [])
         except Exception:
-            issues, suggestions = [], []
+            ev, issues, suggestions = {}, [], []
 
-        file_blocks = []
-        for fp in code_files[:10]:
-            try:
-                text = Path(fp).read_text(encoding="utf-8")
-                file_blocks.append(f"### archivo: {Path(fp).name}\n```\n{text[:3000]}\n```")
-            except Exception:
-                pass
+        # Raíz del proyecto: en modo fix sobre disco es el output_base_dir; si no,
+        # el ancestro común de los archivos escritos.
+        if self.file_writer.root_is_output_dir:
+            project_dir: Optional[Path] = Path(self.file_writer.output_base_dir)
+        else:
+            project_dir = next((Path(f).parent for f in code_files if Path(f).exists()), None)
+        if not project_dir or not project_dir.is_dir():
+            return {"success": False, "files_fixed": [], "error": "Directorio no encontrado"}
 
-        prompt = f"""
+        # ── 1) Completar archivos faltantes (manifiesto + referencias rotas) ──────
+        plan = result.get("plan", "") or ev.get("plan", "")
+        manifest = result.get("manifest", []) or ev.get("manifest", [])
+        missing = list(result.get("missing_files", []) or ev.get("missing_files", []))
+        report = analyze_project(project_dir)
+        for ref in report.get("missing_refs", []):
+            if ref not in missing:
+                missing.append(ref)
+
+        completed_files = []
+        if missing:
+            _dbg.log("FIX", f"completando {len(missing)} archivo(s) faltante(s): {missing}")
+            completed_files = self.complete_missing(task, plan, manifest, missing, project_dir)
+
+        # ── 2) Corrección de calidad sobre issues reportados ─────────────────────
+        # (los strings de 'archivo faltante' ya se atendieron arriba; filtrarlos)
+        quality_issues = [i for i in issues
+                          if "no se generaron" not in i and "se truncó" not in i]
+        fixed_files = []
+        if quality_issues or suggestions:
+            file_blocks = []
+            for fp in code_files[:10]:
+                try:
+                    text = Path(fp).read_text(encoding="utf-8")
+                    file_blocks.append(f"### archivo: {Path(fp).name}\n```\n{text[:3000]}\n```")
+                except Exception:
+                    pass
+
+            prompt = f"""
 Eres un senior developer. CORRIGE los problemas en este proyecto.
 
 Tarea: {task[:300]}
-Problemas: {chr(10).join(f'- {i}' for i in issues) or '- Ver sugerencias'}
+Problemas: {chr(10).join(f'- {i}' for i in quality_issues) or '- Ver sugerencias'}
 Sugerencias: {chr(10).join(f'- {s}' for s in suggestions) or '- Revisar buenas prácticas'}
 {self._rules_block()}
 Archivos actuales:
@@ -175,52 +243,90 @@ Archivos actuales:
 
 Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ext
 """
-        _dbg.log("FIX", f"code_files={len(code_files)}  issues={issues}  suggestions={suggestions}")
-        lang = get_language_instruction()
-        self._progress("REVISIÓN")
-        response = self.client.chat(
-            prompt,
-            system_prompt=f"Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders. {lang}",
-            temperature=0.2, max_tokens=8000,
-        )
-        if not response.get("success"):
-            return {"success": False, "files_fixed": [], "error": response.get("content", "")}
+            _dbg.log("FIX", f"code_files={len(code_files)}  issues={quality_issues}  suggestions={suggestions}")
+            lang = get_language_instruction()
+            self._progress("REVISIÓN")
+            response = self.client.chat(
+                prompt,
+                system_prompt=f"Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders. {lang}",
+                temperature=0.2, max_tokens=8192,
+                auto_continue=True, max_continuations=4,
+            )
+            if response.get("success"):
+                for filename, code in self.file_writer._extract_named_blocks(response["content"]):
+                    safe = [p for p in Path(filename.lstrip("/")).parts if p not in ("..", ".", "~", "/")]
+                    if not safe:
+                        continue
+                    filepath = project_dir.joinpath(*safe)
+                    filepath.parent.mkdir(parents=True, exist_ok=True)
+                    filepath.write_text(code, encoding="utf-8")
+                    fixed_files.append(str(filepath))
+                    self._on_file(str(filepath))
 
-        project_dir: Optional[Path] = next(
-            (Path(f).parent for f in code_files if Path(f).exists()), None
-        )
-        if not project_dir:
-            return {"success": False, "files_fixed": [], "error": "Directorio no encontrado"}
-
-        fixed_files = []
-        for filename, code in self.file_writer._extract_named_blocks(response["content"]):
-            safe = [p for p in Path(filename.lstrip("/")).parts if p not in ("..", ".", "~", "/")]
-            if not safe:
-                continue
-            filepath = project_dir.joinpath(*safe)
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            filepath.write_text(code, encoding="utf-8")
-            fixed_files.append(str(filepath))
-            self._on_file(str(filepath))
-
+        # ── 3) Re-evaluación honesta contra lo que quedó en disco ────────────────
         self._progress("RE-EVALUANDO")
-        success, new_outcome = self._evaluate(task, result.get("plan", ""),
-                                              {"code": response["content"]})
+        on_disk = [str(p) for p in project_dir.rglob("*")
+                   if p.is_file() and ".deep" not in p.parts and not p.name.startswith(".")]
+        success, new_outcome = self._evaluate(task, plan, {"code": ""}, written_files=on_disk)
 
-        if self.file_writer.root_is_output_dir and self.file_writer.last_project_dir:
-            deep_dir = self.file_writer.last_project_dir / ".deep"
+        # Si todavía hay referencias rotas, el fix no terminó: fail honesto.
+        report2 = analyze_project(project_dir)
+        if report2.get("missing_refs"):
+            success = False
+            try:
+                eo = json.loads(new_outcome)
+            except Exception:
+                eo = {"raw": new_outcome}
+            eo["success"] = False
+            eo["missing_refs"] = report2["missing_refs"]
+            new_outcome = json.dumps(eo)
+
+        deep_dir = project_dir / ".deep"
+        if deep_dir.is_dir() or self.file_writer.root_is_output_dir:
             deep_dir.mkdir(exist_ok=True)
             try:
                 eval_data = json.loads(new_outcome)
             except Exception:
                 eval_data = {"raw": new_outcome}
             eval_data["fixed_files"] = fixed_files
+            eval_data["completed_files"] = completed_files
             (deep_dir / "evaluation.json").write_text(
                 json.dumps(eval_data, ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
-        _dbg.log("FIX", f"DONE  success={success}  files_fixed={len(fixed_files)}")
-        return {"success": success, "files_fixed": fixed_files, "outcome": new_outcome}
+        _dbg.log("FIX", f"DONE  success={success}  fixed={len(fixed_files)}  completed={len(completed_files)}")
+        return {
+            "success": success,
+            "files_fixed": fixed_files,
+            "files_completed": completed_files,
+            "outcome": new_outcome,
+        }
+
+    def complete_missing(self, task: str, plan: str, manifest_paths: List[str],
+                         missing_paths: List[str], project_dir: Path) -> List[str]:
+        """Genera y escribe los archivos faltantes (uno por llamada). Devuelve las
+        rutas creadas. Reusa el generador por-archivo del modo manifiesto."""
+        project_dir = Path(project_dir)
+        manifest_paths = manifest_paths or missing_paths
+        created = []
+        total = len(missing_paths)
+        for idx, path in enumerate(missing_paths, 1):
+            self._progress(f"COMPLETANDO {idx}/{total}  {path}")
+            content, truncated, _ = self._generate_file(
+                task, plan, manifest_paths, path, purpose="archivo referenciado por el resto del proyecto")
+            if not content.strip():
+                _dbg.log("FIX", f"  ✗ {path} — no se pudo generar")
+                continue
+            safe = [p for p in Path(path.lstrip("/")).parts if p not in ("..", ".", "~", "/")]
+            if not safe:
+                continue
+            filepath = project_dir.joinpath(*safe)
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            filepath.write_text(content, encoding="utf-8")
+            created.append(str(filepath))
+            self._on_file(str(filepath))
+            _dbg.log("FIX", f"  ✓ {path}  ({len(content)} chars)")
+        return created
 
     def execute_update(self, change: str, task: str) -> Dict:
         _dbg.log("UPDATE", f"change={change[:120]}")
@@ -263,7 +369,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 f"Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo. "
                 f"{lang}"
             ),
-            temperature=0.3, max_tokens=8000,
+            temperature=0.3, max_tokens=8192,
+            auto_continue=True, max_continuations=4,
         )
         if not response.get("success"):
             return {"success": False, "files_updated": [], "error": response.get("content", "")}
@@ -340,7 +447,27 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         return response["content"]
 
-    def _execute(self, task: str, plan: str) -> Dict:
+    def _execute(self, task: str, plan: str, manifest_mode: bool = False) -> Dict:
+        """Genera el código. Con manifest_mode, primero pide el manifiesto de archivos
+        y, si el proyecto es grande, genera archivo por archivo (no se trunca)."""
+        if not manifest_mode:
+            return self._execute_single_shot(task, plan)
+
+        self._progress("MANIFIESTO")
+        files = self._build_manifest(task, plan)
+        _dbg.log("MANIFEST", f"files={len(files)}  paths={[f['path'] for f in files]}")
+
+        # Proyecto chico o manifiesto vacío → un solo tiro (con auto-continuación ya
+        # no se trunca y ahorramos N llamadas).
+        if len(files) <= self.SINGLE_SHOT_MAX_FILES:
+            _dbg.log("MANIFEST", f"≤{self.SINGLE_SHOT_MAX_FILES} archivos → single-shot")
+            out = self._execute_single_shot(task, plan)
+            out["manifest"] = [f["path"] for f in files]
+            return out
+
+        return self._execute_by_manifest(task, plan, files)
+
+    def _execute_single_shot(self, task: str, plan: str) -> Dict:
         lang = get_language_instruction()
         docker_extra = ""
         if any(w in task.lower() for w in ("docker", "dockerizar", "dockerize", "container", "compose")):
@@ -353,11 +480,109 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             "FORMATO: antes de cada bloque escribe ### archivo: ruta/archivo.ext\n"
             "Código completo y funcional. Sin '...' ni placeholders.",
             system_prompt=f"Eres un desarrollador senior. Código limpio, completo. Siempre indicás el nombre del archivo. {lang}",
-            temperature=0.3, max_tokens=12000,
+            temperature=0.3, max_tokens=8192,
+            auto_continue=True, max_continuations=6,
         )
         tokens = response.get("tokens", {}).get("total_tokens", 0)
-        _dbg.log("EXEC", f"response_success={response.get('success')}  tokens={tokens}")
-        return {"code": response["content"], "tokens_used": tokens}
+        truncated = response.get("truncated", False)
+        _dbg.log("EXEC", f"response_success={response.get('success')}  tokens={tokens}  "
+                 f"truncated={truncated}  continuations={response.get('continuations', 0)}")
+        return {
+            "code": response["content"],
+            "tokens_used": tokens,
+            "truncated": truncated,
+        }
+
+    def _build_manifest(self, task: str, plan: str) -> List[Dict]:
+        """Pide al modelo la lista explícita de archivos a crear (JSON)."""
+        lang = get_language_instruction()
+        response = self.client.chat(
+            f"Tarea: {task}\n\nPlan:\n{plan}\n{self._rules_block()}\n{MANIFEST_INSTRUCTIONS}",
+            system_prompt=f"Eres un arquitecto de software. Respondés SOLO con JSON válido. {lang}",
+            temperature=0.2, max_tokens=4000, auto_continue=True, max_continuations=2,
+        )
+        raw = (response.get("content") or "").strip()
+        raw = re.sub(r"```json\n?|```\n?", "", raw).strip()
+        try:
+            data = json.loads(raw)
+            files = data.get("files", []) if isinstance(data, dict) else data
+        except Exception as e:
+            _dbg.log("MANIFEST", f"json_parse_failed={e}  raw={raw[:200]}")
+            return []
+
+        seen, clean = set(), []
+        for f in files:
+            if isinstance(f, str):
+                f = {"path": f, "purpose": ""}
+            path = str(f.get("path", "")).strip().lstrip("/")
+            if not path or path in seen or ".." in Path(path).parts:
+                continue
+            seen.add(path)
+            clean.append({"path": path, "purpose": str(f.get("purpose", "")).strip()})
+        return clean
+
+    def _generate_file(self, task: str, plan: str, manifest_paths: List[str],
+                       path: str, purpose: str) -> Tuple[str, bool, int]:
+        """Genera el contenido de un único archivo. Devuelve (contenido, truncado, tokens)."""
+        lang = get_language_instruction()
+        instr = FILE_GEN_INSTRUCTIONS.format(path=path, purpose=purpose or "(sin descripción)")
+        response = self.client.chat(
+            f"Tarea global: {task}\n\n"
+            f"Plan (resumen):\n{plan[:1800]}\n{self._rules_block()}\n"
+            f"Manifiesto del proyecto (todos los archivos que existen):\n"
+            + "\n".join(f"  - {p}" for p in manifest_paths)
+            + f"\n\n{instr}",
+            system_prompt=f"Eres un desarrollador senior. Generás un archivo completo y funcional. {lang}",
+            temperature=0.3, max_tokens=8192, auto_continue=True, max_continuations=4,
+        )
+        tokens = response.get("tokens", {}).get("total_tokens", 0)
+        if not response.get("success"):
+            return "", True, tokens
+        content = response["content"]
+        # Si el modelo igual usó el formato "### archivo:" o envolvió en fences, lo limpiamos.
+        blocks = self.file_writer._extract_named_blocks(content)
+        if blocks:
+            content = blocks[0][1]
+        else:
+            content = self.file_writer._strip_outer_fence(content)
+        return content.strip("\n"), response.get("truncated", False), tokens
+
+    def _execute_by_manifest(self, task: str, plan: str, files: List[Dict]) -> Dict:
+        """Genera el proyecto archivo por archivo según el manifiesto. No se trunca:
+        cada archivo es una llamada independiente (con auto-continuación)."""
+        manifest_paths = [f["path"] for f in files]
+        total = len(files)
+        parts, missing = [], []
+        tokens_total = 0
+        any_truncated = False
+
+        for idx, f in enumerate(files, 1):
+            path, purpose = f["path"], f["purpose"]
+            self._progress(f"GENERANDO {idx}/{total}  {path}")
+            content, truncated, tokens = self._generate_file(
+                task, plan, manifest_paths, path, purpose)
+            tokens_total += tokens
+            if not content.strip():
+                _dbg.log("MANIFEST", f"  ✗ {path} — generación vacía")
+                missing.append(path)
+                continue
+            if truncated:
+                any_truncated = True
+                _dbg.log("MANIFEST", f"  ⚠ {path} — truncado aun con continuaciones")
+            _dbg.log("MANIFEST", f"  ✓ {path}  ({len(content)} chars)")
+            # Formato que entiende el writer: "### archivo: ruta" + contenido crudo.
+            parts.append(f"### archivo: {path}\n{content}\n")
+
+        code = "\n".join(parts)
+        _dbg.log("EXEC", f"manifest mode: generated={len(parts)}/{total}  "
+                 f"missing={len(missing)}  truncated={any_truncated}")
+        return {
+            "code": code,
+            "tokens_used": tokens_total,
+            "truncated": any_truncated,
+            "missing_files": missing,
+            "manifest": manifest_paths,
+        }
 
     def _evaluate(self, task: str, plan: str, execution: Dict,
                   written_files: List[str] = None,
@@ -485,11 +710,13 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             "files_count": len(names),
         }
 
-    def _persist_context(self, task: str, plan: str, success: bool, outcome: str):
+    def _persist_context(self, task: str, plan: str, success: bool, outcome: str,
+                         manifest: List[str] = None):
         deep_dir = self.file_writer.last_project_dir / ".deep"
         deep_dir.mkdir(exist_ok=True)
         (deep_dir / "context.json").write_text(
             json.dumps({"task": task, "plan": plan, "model": self.client.model,
+                        "manifest": manifest or [],
                         "timestamp": datetime.now().isoformat()},
                        ensure_ascii=False, indent=2),
             encoding="utf-8",

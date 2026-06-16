@@ -25,7 +25,8 @@ from core.postcheck import format_report
 def run_build(task: str, api_key: str, output_dir: str,
               model: str = "deepseek-chat", root_is_output_dir: bool = False,
               rules: List[str] = None, verbose: bool = False,
-              auto_fix: bool = False, project_name: str = "") -> Optional[dict]:
+              auto_fix: bool = False, project_name: str = "",
+              manifest: bool = True) -> Optional[dict]:
 
     if not project_name and not root_is_output_dir:
         from core.writer import FileWriter
@@ -39,6 +40,7 @@ def run_build(task: str, api_key: str, output_dir: str,
     print(f"\n🚀 Generando: {task}")
     print(f"📁 Proyecto:  {project_name}")
     print(f"📂 Destino:   {Path(output_dir).resolve()}")
+    print(f"⚙️  Modo:      {'manifiesto (archivo por archivo)' if manifest else 'single-shot'}")
     if rules:
         print(f"📏 Reglas:    {len(rules)} cargadas desde .deeprules")
 
@@ -71,7 +73,7 @@ def run_build(task: str, api_key: str, output_dir: str,
         spinner.start()
 
     try:
-        result = system.execute_and_learn(task)
+        result = system.execute_and_learn(task, manifest=manifest)
     except KeyboardInterrupt:
         if spinner:
             spinner.stop()
@@ -95,7 +97,16 @@ def run_build(task: str, api_key: str, output_dir: str,
 
     tokens = system.client.get_stats().get("total_tokens_used", 0)
     show_balance(api_key, label="Crédito después del build", before=before, tokens=tokens)
-    show_files(result.get("files_written", []))
+    if result.get("truncated"):
+        print("\n⚠️  La generación se truncó por el límite de tokens del modelo,")
+        print("   incluso tras las continuaciones automáticas. EL PROYECTO ESTÁ INCOMPLETO.")
+        print("   Sugerencias:")
+        print("     • Dividí el trabajo en módulos:  deep navigator --init")
+        print("     • O completá lo que falta:        deep fix")
+
+    show_files(result.get("files_written", []),
+               title="📄 Archivos escritos (parcial):" if result.get("truncated")
+               else "✅ Archivos creados:")
     show_evaluation(result)
     _show_postcheck(result)
 
@@ -159,6 +170,8 @@ def run_fix_current(api_key: str, project_dir: Path, rules: List[str] = None) ->
         "files_written": code_files,
         "outcome": json.dumps(evaluation),
         "plan": ctx.get("plan", ""),
+        "manifest": ctx.get("manifest", []),
+        "missing_files": evaluation.get("missing_files", []),
         "success": evaluation.get("success", False),
     }
 
@@ -194,6 +207,9 @@ def run_fix_current(api_key: str, project_dir: Path, rules: List[str] = None) ->
             display = path
         print(f"   💾 {display}")
 
+    completed = fix_result.get("files_completed", [])
+    if completed:
+        print(f"\n🧩 {len(completed)} archivo(s) faltante(s) generado(s).")
     fixed = fix_result.get("files_fixed", [])
     if fixed:
         print(f"\n🔧 {len(fixed)} archivo(s) corregido(s).")
@@ -329,7 +345,8 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
                   model: str = "deepseek-chat", rules: List[str] = None,
                   init: bool = False, review: bool = False,
                   fix_file: Optional[str] = None, auto_fix: bool = False,
-                  force: bool = False, verbose: bool = False) -> None:
+                  force: bool = False, verbose: bool = False,
+                  review_module: Optional[str] = None) -> None:
     """El navigator planifica (job.md), DeepSeek construye y corrige.
 
     Modos:
@@ -365,9 +382,9 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
 
     job = nav.parse_job(job_path.read_text(encoding="utf-8"))
 
-    # ── --review: estado + formato para que Claude revise ────────────────────
+    # ── --review: código + estado + formato para que el arquitecto revise ────
     if review:
-        print(nav.render_review(project_dir, job))
+        print(nav.render_review(project_dir, job, module=review_module))
         return
 
     if job["errors"]:
@@ -427,12 +444,10 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
     for idx, mod in enumerate(job["modules"], 1):
         print(f"\n── [{idx}/{total}] módulo: {mod['name']} ──")
         task = f"{mod['name']}: {mod['body']}".strip()
-        # Plan inyectado = arquitectura global de Claude + detalle del módulo.
+        # Plan inyectado = stack + arquitectura global + contratos compartidos +
+        # código ya construido por otros módulos + detalle estructurado del módulo.
         # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
-        plan = (
-            f"PLAN GENERAL (definido por el navigator):\n{job['plan']}\n\n"
-            f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
-        )
+        plan = nav.build_module_plan(job, mod, project_dir)
         system = _make_system()
         try:
             result = system.execute_and_learn(task, plan=plan)
@@ -451,8 +466,26 @@ def run_navigator(api_key: str, project_dir: Path, job_file: Optional[str] = Non
             })
             continue
 
+        # Gate: ¿construyó exactamente los archivos declarados en files:?
+        gate = nav.gate_module(mod, result.get("files_written", []), project_dir)
+        if gate["missing"]:
+            print(f"   ⚠️  faltan {len(gate['missing'])} archivo(s) declarado(s): "
+                  f"{', '.join(gate['missing'])}")
+            created = system.complete_missing(
+                task, plan, mod.get("files", []), gate["missing"], project_dir)
+            if created:
+                print(f"   🧩 {len(created)} archivo(s) completado(s) automáticamente")
+                result.setdefault("files_written", []).extend(created)
+                gate = nav.gate_module(mod, result["files_written"], project_dir)
+        if gate["extra"]:
+            print(f"   ⚠️  {len(gate['extra'])} archivo(s) no declarado(s) "
+                  f"(posible invención): {', '.join(gate['extra'][:5])}")
+        result["gate"] = gate
+
         nav.save_module_state(project_dir, mod["name"], result)
-        if result.get("success"):
+        if gate["missing"]:
+            print(f"   ❌ módulo incompleto — todavía faltan: {', '.join(gate['missing'])}")
+        elif result.get("success"):
             print(f"   ✅ módulo ok — {len(result.get('files_written', []))} archivo(s)")
         else:
             print("   ⚠️  el evaluador marcó observaciones")
@@ -881,6 +914,9 @@ def _do_fix(system: DeepSeekLearningSystem, task: str, result: dict,
             display = path
         print(f"   💾 {display}")
 
+    completed = fix_result.get("files_completed", [])
+    if completed:
+        print(f"\n🧩 {len(completed)} archivo(s) faltante(s) generado(s).")
     fixed = fix_result.get("files_fixed", [])
     if fixed:
         print(f"\n🔧 {len(fixed)} archivo(s) corregido(s).")

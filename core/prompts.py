@@ -21,3 +21,26 @@ DOCKER / NODE (si aplica Dockerfile o package.json):
 UPDATE_DOCKER_HINT = """
 Si el cambio involucra Docker: alinear con el repo real (archivos existentes, package-lock si hay npm ci).
 """
+
+# ── Generación por manifiesto (Nivel 2: escala a proyectos grandes) ──────────
+
+MANIFEST_INSTRUCTIONS = """
+Listá TODOS los archivos que hay que crear para implementar el plan completo.
+Incluí TODO: código, configs, Dockerfiles, vistas/templates, SQL, assets, tests.
+No omitas archivos que el código vaya a importar o referenciar (controllers,
+templates, módulos, etc.). Pensá en el proyecto terminado y funcionando.
+
+Respondé SOLO con JSON válido, sin texto alrededor, con esta forma exacta:
+{"files": [{"path": "ruta/relativa.ext", "purpose": "para qué sirve, en una línea"}]}
+"""
+
+FILE_GEN_INSTRUCTIONS = """
+Generá el contenido COMPLETO y funcional de UN solo archivo: {path}
+Propósito: {purpose}
+
+Reglas:
+- Devolvé SOLO el contenido del archivo, sin explicaciones ni comentarios fuera del código.
+- Sin '...' ni placeholders ni TODOs: código real y completo.
+- Respetá rutas e imports según el manifiesto (los demás archivos existen en esas rutas).
+- No envuelvas la respuesta en un bloque markdown ``` salvo que el archivo sea markdown.
+"""

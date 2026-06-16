@@ -52,6 +52,75 @@ class ParseJobTests(unittest.TestCase):
         self.assertTrue(any("módulos" in e for e in errors))
 
 
+JOB_V2 = """# JOB: API de notas
+
+## STACK
+- lenguaje: PHP 8.2
+- dependencias: ninguna
+
+## PLAN
+Arquitectura por capas.
+
+## CONTRACTS
+NoteRepository::find(int $id): ?Note
+ruta GET /notes -> NoteController::index
+
+## RULES
+- controllers finos
+
+## TASKS
+### repo
+files:
+- src/NoteRepository.php
+uses:
+- (ninguno)
+done:
+- implementa find() y all()
+
+### http
+files:
+- src/NoteController.php
+- public/index.php
+uses:
+- NoteRepository
+done:
+- expone GET /notes
+"""
+
+
+class ParseJobV2Tests(unittest.TestCase):
+    def test_parses_stack_and_contracts(self):
+        job = nav.parse_job(JOB_V2)
+        self.assertIn("PHP 8.2", job["stack"])
+        self.assertIn("NoteRepository::find", job["contracts"])
+
+    def test_parses_structured_module_fields(self):
+        mods = {m["name"]: m for m in nav.parse_job(JOB_V2)["modules"]}
+        self.assertEqual(mods["http"]["files"],
+                         ["src/NoteController.php", "public/index.php"])
+        self.assertEqual(mods["http"]["uses"], ["NoteRepository"])
+        self.assertEqual(mods["repo"]["uses"], [])  # "(ninguno)" → vacío
+        self.assertTrue(mods["repo"]["done"])
+
+    def test_inline_comma_list_supported(self):
+        job = nav.parse_job(
+            "# JOB: x\n## PLAN\np\n## TASKS\n### m\nfiles: a.py, b.py\n")
+        self.assertEqual(job["modules"][0]["files"], ["a.py", "b.py"])
+
+    def test_v1_module_without_fields_stays_backward_compatible(self):
+        job = nav.parse_job(JOB)  # job v1 sin files:/uses:/done:
+        mod = job["modules"][0]
+        self.assertEqual(mod["files"], [])
+        self.assertEqual(mod["uses"], [])
+        self.assertIn("login", mod["body"])  # el body crudo se conserva
+
+    def test_template_v2_declares_files_in_example_module(self):
+        job = nav.parse_job(nav.job_template("demo"))
+        self.assertEqual(job["errors"], [])
+        self.assertTrue(job["modules"][0]["files"],
+                        "el módulo de ejemplo debe declarar files:")
+
+
 class ParseCorrectionsTests(unittest.TestCase):
     def test_parses_modules_and_items(self):
         corr = nav.parse_corrections(
@@ -98,6 +167,80 @@ class TemplateTests(unittest.TestCase):
         self.assertIn("dependencias", joined)
 
 
+class BuildModulePlanTests(unittest.TestCase):
+    def test_plan_includes_stack_contracts_and_module_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            plan = nav.build_module_plan(job, http, root)
+            self.assertIn("STACK", plan)
+            self.assertIn("PHP 8.2", plan)
+            self.assertIn("CONTRACTS", plan)
+            self.assertIn("NoteRepository::find", plan)
+            self.assertIn("src/NoteController.php", plan)  # files: del módulo
+            self.assertIn("expone GET /notes", plan)        # done:
+
+    def test_plan_injects_already_built_sibling_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            repo_file = root / "src" / "NoteRepository.php"
+            repo_file.write_text("<?php\nclass NoteRepository { public function find($id){} }",
+                                 encoding="utf-8")
+            nav.save_module_state(root, "repo", {
+                "success": True, "files_written": [str(repo_file)]})
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            plan = nav.build_module_plan(job, http, root)
+            # el código real del módulo hermano ya construido aparece en el plan
+            self.assertIn("YA CONSTRUIDO POR OTROS MÓDULOS", plan)
+            self.assertIn("class NoteRepository", plan)
+
+    def test_sibling_excerpts_respect_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            big = root / "src" / "NoteRepository.php"
+            big.write_text("X" * 5000, encoding="utf-8")
+            nav.save_module_state(root, "repo", {
+                "success": True, "files_written": [str(big)]})
+            job = nav.parse_job(JOB_V2)
+            http = next(m for m in job["modules"] if m["name"] == "http")
+            exc = nav._sibling_excerpts(job, http, root, budget=2000, per_file=800)
+            self.assertLessEqual(len(exc), 2000)
+            self.assertIn("truncado", exc)
+
+
+class GateModuleTests(unittest.TestCase):
+    def test_missing_declared_file_is_flagged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "src" / "NoteController.php").write_text("<?php", encoding="utf-8")
+            mod = {"name": "http",
+                   "files": ["src/NoteController.php", "public/index.php"]}
+            gate = nav.gate_module(mod, [str(root / "src" / "NoteController.php")], root)
+            self.assertEqual(gate["missing"], ["public/index.php"])
+            self.assertFalse(gate["ok"])
+
+    def test_extra_file_is_flagged_as_invention(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x=1", encoding="utf-8")
+            (root / "surprise.py").write_text("y=2", encoding="utf-8")
+            mod = {"name": "m", "files": ["a.py"]}
+            gate = nav.gate_module(
+                mod, [str(root / "a.py"), str(root / "surprise.py")], root)
+            self.assertEqual(gate["extra"], ["surprise.py"])
+            self.assertTrue(gate["ok"])  # extra es advertencia, no falla dura
+
+    def test_v1_module_without_files_is_not_gated(self):
+        gate = nav.gate_module({"name": "m", "files": []}, ["whatever.py"], Path("/tmp"))
+        self.assertTrue(gate["ok"])
+        self.assertEqual(gate["declared"], [])
+
+
 class RenderReviewTests(unittest.TestCase):
     def test_lists_built_files_and_flags_untracked(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -117,6 +260,46 @@ class RenderReviewTests(unittest.TestCase):
             self.assertIn("surprise.py", out)
             # RESPONSE.md no se cuenta como archivo de código
             self.assertNotIn("RESPONSE.md", out)
+
+    def test_embeds_real_code_for_web_architect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login():\n    return 'jwt'\n", encoding="utf-8")
+            nav.save_module_state(root, "auth", {
+                "success": True, "files_written": [str(root / "auth.py")]})
+            job = {"title": "demo", "modules": [{"name": "auth", "body": "- login"}]}
+            out = nav.render_review(root, job)
+            # el contenido real del archivo está embebido, no solo el nombre
+            self.assertIn("def login():", out)
+            self.assertIn("return 'jwt'", out)
+
+    def test_review_shows_gate_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x=1", encoding="utf-8")
+            nav.save_module_state(root, "m", {
+                "success": True, "files_written": [str(root / "a.py")],
+                "gate": {"declared": ["a.py", "b.py"], "missing": ["b.py"],
+                         "extra": [], "ok": False}})
+            job = {"title": "demo", "modules": [{"name": "m", "body": "x"}]}
+            out = nav.render_review(root, job)
+            self.assertIn("GATE", out)
+            self.assertIn("b.py", out)
+
+    def test_module_filter_scopes_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("AAA", encoding="utf-8")
+            (root / "b.py").write_text("BBB", encoding="utf-8")
+            nav.save_module_state(root, "ma", {"success": True, "files_written": [str(root / "a.py")]})
+            nav.save_module_state(root, "mb", {"success": True, "files_written": [str(root / "b.py")]})
+            job = {"title": "demo", "modules": [{"name": "ma", "body": "x"},
+                                                {"name": "mb", "body": "y"}]}
+            out = nav.render_review(root, job, module="ma")
+            self.assertIn("AAA", out)
+            self.assertNotIn("BBB", out)
+            # con filtro no se vuelca el inventario completo
+            self.assertNotIn("INVENTARIO", out.upper())
 
 
 class InitForceTests(unittest.TestCase):
