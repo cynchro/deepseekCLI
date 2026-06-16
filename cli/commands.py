@@ -810,8 +810,14 @@ def run_scan(api_key: str, project_dir: Path, model: str = "deepseek-chat",
     })
     ctx_file.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    from core.project_scanner import seed_project_doc
+    created_doc = seed_project_doc(project_dir, pmap["name"], summary)
+
     if summary and not quiet:
         print("\n" + summary + "\n")
+    if created_doc and not quiet:
+        print("📝 Creé .deep/PROJECT.md — editalo para fijar contexto/reglas "
+              "que el CLI respetará en build y update.\n")
     return ctx
 
 

@@ -92,6 +92,17 @@ class DeepSeekLearningSystem:
         lines = "\n".join(f"  {i+1}. {r}" for i, r in enumerate(self.rules))
         return f"\nREGLAS OBLIGATORIAS (.deeprules):\n{lines}\n"
 
+    def _project_doc_block(self, project_dir) -> str:
+        """Inyecta `.deep/PROJECT.md` (contexto/reglas escritas por el usuario)."""
+        from core.project_scanner import load_project_doc
+        doc = load_project_doc(project_dir)
+        if not doc:
+            return ""
+        return (
+            "\nCONTEXTO DEL PROYECTO (.deep/PROJECT.md — instrucciones del usuario "
+            "a respetar siempre):\n" + doc + "\n"
+        )
+
     def execute_and_learn(self, task: str) -> Dict:
         _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}")
         _dbg.log("SYSTEM", f"workflow=iterative  pro={MODEL_PRO}  flash={MODEL_FLASH}")
@@ -308,7 +319,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             f"{scope}"
             f"Archivos relevantes:\n{''.join(file_blocks)}\n\n"
             f"Cambio solicitado: {change}\n"
-            f"{self._rules_block()}\n"
+            f"{self._rules_block()}"
+            f"{self._project_doc_block(project_dir)}\n"
             "Respetá la estructura, convenciones y stack existentes. "
             "Devolvé SOLO los archivos modificados o nuevos con el formato:\n"
             "### archivo: ruta/archivo.ext\n"
@@ -404,6 +416,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 for e in similar[:3]
             )
         prompt = build_plan_prompt(task, self._rules_block(), experience_context)
+        if self.file_writer.root_is_output_dir:
+            prompt += self._project_doc_block(self.file_writer.output_base_dir)
         if build_state:
             prompt = self._inject_state(prompt, build_state)
         response = self._chat(

@@ -206,6 +206,43 @@ def format_map(pmap: Dict) -> str:
     return "\n".join(lines)
 
 
+# ── PROJECT.md editable por el usuario (estilo CLAUDE.md) ──────────────────────
+
+PROJECT_DOC = "PROJECT.md"
+
+
+def load_project_doc(project_dir) -> str:
+    """Lee `.deep/PROJECT.md` (instrucciones del usuario) si existe."""
+    fp = Path(project_dir) / ".deep" / PROJECT_DOC
+    if not fp.is_file():
+        return ""
+    try:
+        return fp.read_text(encoding="utf-8", errors="ignore").strip()
+    except Exception:
+        return ""
+
+
+def seed_project_doc(project_dir, name: str, summary: str) -> bool:
+    """Crea `.deep/PROJECT.md` con un template si todavía no existe.
+
+    Devuelve True si lo creó; False si ya existía (no se pisa nunca).
+    """
+    fp = Path(project_dir) / ".deep" / PROJECT_DOC
+    if fp.exists():
+        return False
+    fp.parent.mkdir(parents=True, exist_ok=True)
+    template = (
+        f"# {name}\n\n"
+        f"{summary}\n\n"
+        "## Notas del proyecto\n"
+        "<!-- Editá esta sección: el CLI la respeta en build y update.\n"
+        "Ejemplos: \"La API key va en .env\", \"No modificar legacy/\",\n"
+        "\"Usar pytest para los tests\", \"Toda respuesta incluye campo timestamp\". -->\n"
+    )
+    fp.write_text(template, encoding="utf-8")
+    return True
+
+
 def _rel(path: Path, root: Path) -> str:
     rel = path.relative_to(root).as_posix()
     return rel if rel else "."
