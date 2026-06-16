@@ -52,6 +52,75 @@ class ParseJobTests(unittest.TestCase):
         self.assertTrue(any("módulos" in e for e in errors))
 
 
+JOB_V2 = """# JOB: API de notas
+
+## STACK
+- lenguaje: PHP 8.2
+- dependencias: ninguna
+
+## PLAN
+Arquitectura por capas.
+
+## CONTRACTS
+NoteRepository::find(int $id): ?Note
+ruta GET /notes -> NoteController::index
+
+## RULES
+- controllers finos
+
+## TASKS
+### repo
+files:
+- src/NoteRepository.php
+uses:
+- (ninguno)
+done:
+- implementa find() y all()
+
+### http
+files:
+- src/NoteController.php
+- public/index.php
+uses:
+- NoteRepository
+done:
+- expone GET /notes
+"""
+
+
+class ParseJobV2Tests(unittest.TestCase):
+    def test_parses_stack_and_contracts(self):
+        job = nav.parse_job(JOB_V2)
+        self.assertIn("PHP 8.2", job["stack"])
+        self.assertIn("NoteRepository::find", job["contracts"])
+
+    def test_parses_structured_module_fields(self):
+        mods = {m["name"]: m for m in nav.parse_job(JOB_V2)["modules"]}
+        self.assertEqual(mods["http"]["files"],
+                         ["src/NoteController.php", "public/index.php"])
+        self.assertEqual(mods["http"]["uses"], ["NoteRepository"])
+        self.assertEqual(mods["repo"]["uses"], [])  # "(ninguno)" → vacío
+        self.assertTrue(mods["repo"]["done"])
+
+    def test_inline_comma_list_supported(self):
+        job = nav.parse_job(
+            "# JOB: x\n## PLAN\np\n## TASKS\n### m\nfiles: a.py, b.py\n")
+        self.assertEqual(job["modules"][0]["files"], ["a.py", "b.py"])
+
+    def test_v1_module_without_fields_stays_backward_compatible(self):
+        job = nav.parse_job(JOB)  # job v1 sin files:/uses:/done:
+        mod = job["modules"][0]
+        self.assertEqual(mod["files"], [])
+        self.assertEqual(mod["uses"], [])
+        self.assertIn("login", mod["body"])  # el body crudo se conserva
+
+    def test_template_v2_declares_files_in_example_module(self):
+        job = nav.parse_job(nav.job_template("demo"))
+        self.assertEqual(job["errors"], [])
+        self.assertTrue(job["modules"][0]["files"],
+                        "el módulo de ejemplo debe declarar files:")
+
+
 class ParseCorrectionsTests(unittest.TestCase):
     def test_parses_modules_and_items(self):
         corr = nav.parse_corrections(

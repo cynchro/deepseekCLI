@@ -47,6 +47,31 @@ def _bullets(body: str) -> List[str]:
     return [m.group(1).strip() for m in _BULLET.finditer(body)]
 
 
+# Campos estructurados de un módulo: `files:`, `uses:`, `done:`. Cada uno admite
+# items en bullets debajo y/o una lista inline separada por comas en la misma línea.
+_FIELD_RE = re.compile(r"^[ \t]*(files|uses|done)[ \t]*:(.*)$",
+                       re.IGNORECASE | re.MULTILINE)
+_EMPTY_MARKERS = {"(ninguno)", "(none)", "ninguno", "none", "n/a", "-", "—"}
+
+
+def _parse_fields(body: str) -> Dict[str, List[str]]:
+    """Extrae files/uses/done del cuerpo de un módulo. Si no hay etiquetas
+    (formato v1, bullets sueltos), devuelve listas vacías y el body queda intacto."""
+    fields: Dict[str, List[str]] = {"files": [], "uses": [], "done": []}
+    labels = list(_FIELD_RE.finditer(body))
+    for i, m in enumerate(labels):
+        key = m.group(1).lower()
+        start = m.end()
+        end = labels[i + 1].start() if i + 1 < len(labels) else len(body)
+        items: List[str] = []
+        inline = m.group(2).strip()
+        if inline:
+            items += [x.strip() for x in inline.split(",") if x.strip()]
+        items += _bullets(body[start:end])
+        fields[key] = [it for it in items if it.lower() not in _EMPTY_MARKERS]
+    return fields
+
+
 def _title(text: str) -> str:
     m = _H1.search(text)
     if not m:
@@ -65,6 +90,8 @@ def parse_job(text: str) -> Dict:
     secs = _sections(text)
     tasks_body = secs.get("TASKS", "")
     modules = _split_by(_H3, tasks_body)
+    for mod in modules:
+        mod.update(_parse_fields(mod["body"]))
 
     errors: List[str] = []
     if "TASKS" not in secs:
@@ -76,7 +103,9 @@ def parse_job(text: str) -> Dict:
 
     return {
         "title": _title(text),
+        "stack": secs.get("STACK", "").strip(),
         "plan": secs.get("PLAN", ""),
+        "contracts": secs.get("CONTRACTS", "").strip(),
         "rules": _bullets(secs.get("RULES", "")),
         "modules": modules,
         "errors": errors,
@@ -104,25 +133,43 @@ def parse_corrections(text: str) -> Dict:
 
 JOB_TEMPLATE = """# JOB: {title}
 
+## STACK
+<!-- Lenguaje, versión y dependencias PERMITIDAS. Cerrado: DeepSeek no usa nada
+     que no esté acá. -->
+- lenguaje: <ej. PHP 8.2 / Python 3.12 / Go 1.22>
+- dependencias: <lista exacta, o "ninguna">
+
 ## PLAN
-<!-- Arquitectura general del proyecto. Lo escribe el navigator.
+<!-- Arquitectura general del proyecto. Lo escribe el navigator (el arquitecto).
      DeepSeek usa esto como plan y NO vuelve a planificar. -->
 
+## CONTRACTS
+<!-- Interfaces, tipos, esquemas y firmas COMPARTIDAS entre módulos. Se inyecta en
+     CADA módulo como fuente de verdad, para que los cruces cierren y nadie invente.
+     Ej: firmas de funciones públicas, forma de DTOs/structs, esquema de tablas,
+     rutas HTTP, nombres de servicios. Si A expone algo que B consume, va acá. -->
+
 ## RULES
-<!-- Restricciones que DeepSeek respeta en cada módulo. Las de abajo reducen la
-     invención; agregá las tuyas (stack, convenciones, etc.). -->
-- No agregar dependencias que no estén indicadas en el PLAN o en el módulo.
-- No crear archivos que no estén mencionados en TASKS.
+<!-- Restricciones que DeepSeek respeta en cada módulo. -->
+- No agregar dependencias que no estén en STACK, PLAN o el módulo.
+- No crear archivos que no estén listados en `files:` del módulo.
+- Respetar exactamente las rutas, firmas y contratos definidos en CONTRACTS.
 - Si falta información para implementar algo, dejar un TODO explícito — NO inventar.
-- Respetar exactamente las rutas y firmas de funciones que indique cada módulo.
 
 ## TASKS
 <!-- Un `### <módulo>` por cada pieza a construir. DeepSeek construye uno por uno.
-     Cuanto más concreto (rutas de archivo, firmas, dependencias, esquemas),
-     menos margen de invención. -->
+     Por cada módulo:
+       files:  rutas EXACTAS que debe crear (y solo esas).
+       uses:   qué contratos/módulos consume (de CONTRACTS o de otro módulo).
+       done:   qué tiene que cumplir para considerarse terminado.
+     Cuanto más concreto, menos margen de invención. -->
 ### modulo-ejemplo
-- archivo ejemplo/main.py: función run() -> None
-- subtarea concreta con su detalle
+files:
+- ejemplo/main.py
+uses:
+- (ninguno)
+done:
+- función run() -> None que imprime "ok"
 """
 
 
