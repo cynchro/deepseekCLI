@@ -217,3 +217,105 @@ def _is_ignored(path: Path, root: Path) -> bool:
     except ValueError:
         return True
     return any(part in _IGNORE_DIRS for part in parts)
+
+
+# ── selección de archivos relevantes (para update consciente) ──────────────────
+
+# Extensiones de texto/código que tiene sentido enviar al LLM.
+_TEXT_EXTS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".vue", ".svelte", ".go", ".rs",
+    ".java", ".kt", ".rb", ".php", ".cs", ".cpp", ".c", ".h", ".hpp", ".dart",
+    ".html", ".css", ".scss", ".sass", ".json", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".env", ".md", ".txt", ".sql", ".sh", ".xml",
+}
+_MAX_FILE_BYTES = 200_000
+_STOPWORDS = {
+    "the", "and", "for", "que", "con", "los", "las", "del", "una", "uno",
+    "por", "para", "como", "este", "esta", "que", "agregar", "agrega", "add",
+    "crear", "crea", "create", "hacer", "haz", "make", "cambiar", "cambia",
+    "modificar", "modifica", "update", "nuevo", "nueva", "new",
+}
+
+
+def select_relevant_files(root, pmap: Dict, change: str, max_files: int = 12):
+    """Selecciona los archivos más relevantes a `change`, respetando fronteras de sub-proyecto.
+
+    Devuelve `(archivos: List[Path], target_subs: List[str])`. `target_subs` vacío
+    significa "sin restricción de componente" (monolito o cambio ambiguo).
+    """
+    root = Path(root)
+    tokens = _tokenize(change)
+    subs = pmap.get("subprojects", []) if pmap else []
+
+    candidates = [
+        f for f in root.rglob("*")
+        if f.is_file() and not _is_ignored(f, root) and _is_text_file(f)
+    ]
+
+    target_subs = _target_subprojects(subs, tokens)
+    if target_subs:
+        candidates = [
+            f for f in candidates if _subproject_of(f, root, subs) in target_subs
+        ]
+
+    scored = [(_relevance(f, root, tokens), f) for f in candidates]
+    scored.sort(key=lambda x: (-x[0], str(x[1])))
+    selected = [f for _, f in scored[:max_files]]
+    return selected, target_subs
+
+
+def _tokenize(text: str) -> set:
+    words = "".join(c.lower() if c.isalnum() else " " for c in text).split()
+    return {w for w in words if len(w) >= 3 and w not in _STOPWORDS}
+
+
+def _is_text_file(path: Path) -> bool:
+    if path.name.startswith("."):
+        return path.suffix in _TEXT_EXTS or path.name in (".env", ".gitignore")
+    try:
+        if path.stat().st_size > _MAX_FILE_BYTES:
+            return False
+    except OSError:
+        return False
+    return path.suffix in _TEXT_EXTS or path.suffix == ""
+
+
+def _target_subprojects(subs: List[Dict], tokens: set) -> List[str]:
+    """Sub-proyectos mencionados (por nombre de carpeta, lenguaje o framework)."""
+    targets = []
+    for s in subs:
+        if s["path"] == ".":
+            continue
+        keywords = set(_tokenize(s["path"]))
+        keywords.add(s.get("language", "").lower())
+        if s.get("framework"):
+            keywords.add(s["framework"].lower())
+        if keywords & tokens:
+            targets.append(s["path"])
+    return targets
+
+
+def _subproject_of(path: Path, root: Path, subs: List[Dict]) -> str:
+    """Devuelve el path del sub-proyecto que contiene a `path` (el prefijo más largo)."""
+    rel = path.relative_to(root).as_posix()
+    best = "."
+    for s in subs:
+        sp = s["path"]
+        if sp == ".":
+            continue
+        if rel == sp or rel.startswith(sp + "/"):
+            if len(sp) > len(best):
+                best = sp
+    return best
+
+
+def _relevance(path: Path, root: Path, tokens: set) -> int:
+    """Puntaje por solapamiento de tokens; el path pesa más que el contenido."""
+    rel = path.relative_to(root).as_posix()
+    score = len(_tokenize(rel) & tokens) * 3
+    try:
+        head = path.read_text(encoding="utf-8", errors="ignore")[:4000]
+        score += len(_tokenize(head) & tokens)
+    except Exception:
+        pass
+    return score

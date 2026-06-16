@@ -269,29 +269,47 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
 
     def execute_update(self, change: str, task: str) -> Dict:
         _dbg.log("UPDATE", f"change={change[:120]}")
-        project_dir = Path(self.file_writer.output_dir)
+        from core.project_scanner import scan, select_relevant_files
+
+        project_dir = Path(self.file_writer.output_base_dir)
+
+        # Contexto del proyecto: mapa + resumen (del cache de scan, o se escanea ahora).
+        pmap, summary = self._load_project_context(project_dir)
+        if not pmap:
+            pmap = scan(project_dir)
+
+        selected, target_subs = select_relevant_files(project_dir, pmap, change)
+        scope = (
+            f"Componente afectado: {', '.join(target_subs)}. "
+            "Modificá SOLO archivos dentro de ese componente.\n"
+            if target_subs else
+            "Cambio sin componente específico: tocá solo lo necesario.\n"
+        )
+        self._progress(
+            f"ANALIZANDO ({len(selected)} archivos relevantes"
+            + (f" en {', '.join(target_subs)}" if target_subs else "") + ")"
+        )
 
         file_blocks = []
-        all_files = sorted(
-            f for f in project_dir.rglob("*")
-            if f.is_file() and ".deep" not in f.parts and not f.name.startswith(".")
-        )
-        for f in all_files[:15]:
+        for f in selected:
             try:
-                text = f.read_text(encoding="utf-8")
+                text = f.read_text(encoding="utf-8", errors="ignore")
                 rel = f.relative_to(project_dir)
-                file_blocks.append(f"### archivo: {rel}\n```\n{text[:2000]}\n```")
+                file_blocks.append(f"### archivo: {rel}\n```\n{text[:2500]}\n```")
             except Exception:
                 pass
-        if len(all_files) > 15:
-            self._progress(f"ANALIZANDO ({len(all_files)} archivos, enviando 15)")
 
-        self._progress("ANALIZANDO")
+        summary_block = f"Resumen del proyecto:\n{summary}\n\n" if summary else ""
         prompt = (
             f"Proyecto actual: {task}\n\n"
-            f"Archivos existentes:\n{''.join(file_blocks)}\n\n"
+            f"{summary_block}"
+            f"Estructura ({pmap.get('kind', '?')}): "
+            f"{', '.join(s['path'] for s in pmap.get('subprojects', [])) or 'raíz'}\n\n"
+            f"{scope}"
+            f"Archivos relevantes:\n{''.join(file_blocks)}\n\n"
             f"Cambio solicitado: {change}\n"
             f"{self._rules_block()}\n"
+            "Respetá la estructura, convenciones y stack existentes. "
             "Devolvé SOLO los archivos modificados o nuevos con el formato:\n"
             "### archivo: ruta/archivo.ext\n"
             "Código completo. Sin placeholders ni '...'."
@@ -328,6 +346,17 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 pass
 
         return {"success": True, "files_updated": updated_files}
+
+    def _load_project_context(self, project_dir: Path) -> Tuple[Optional[Dict], str]:
+        """Lee el mapa y el resumen cacheados por `scan` (.deep/context.json)."""
+        ctx_file = project_dir / ".deep" / "context.json"
+        if not ctx_file.exists():
+            return None, ""
+        try:
+            ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
+        except Exception:
+            return None, ""
+        return ctx.get("project_map"), ctx.get("summary", "")
 
     def demonstrate_learning(self) -> Dict:
         if not self.memory.experiences:
