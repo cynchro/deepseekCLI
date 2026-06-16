@@ -50,6 +50,10 @@ _PATCH_SYSTEM = (
 _FINAL_REVIEW_SYSTEM = (
     "Eres un arquitecto de software que evalúa integración global del proyecto. "
     "Enfocate en consistencia entre archivos, piezas faltantes e issues de integración. "
+    "Evaluá SOLO contra lo que la tarea pide explícitamente: NO exijas ni bajes el score "
+    "por requisitos no solicitados (LICENSE, CI/CD, Dockerfile, tests, type hints, "
+    "linters, docs extra) salvo que la tarea los mencione. Penalizá únicamente bugs "
+    "reales, código roto o incumplimiento de lo pedido, no mejoras opcionales. "
     "Respondé SOLO con JSON válido."
 )
 
@@ -843,6 +847,9 @@ Faltantes del plan: {', '.join(missing) if missing else 'ninguno'}
 {heuristic_note}
 
 Enfocate en: consistencia entre módulos, integración, piezas faltantes, imports rotos.
+Evaluá SOLO contra lo pedido en la tarea. NO restes puntos por requisitos no solicitados
+(LICENSE, CI, Docker, tests, type hints, docs). Si el proyecto cumple lo que la tarea pide
+y funciona, success=true aunque falten mejoras opcionales.
 
 SNIPPETS:
 {chr(10).join(file_parts)}
