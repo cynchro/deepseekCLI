@@ -216,7 +216,7 @@ Archivos actuales:
 Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ext
 """
         self._progress("REVISIÓN")
-        response = self.client.chat(
+        response = self._chat(
             prompt,
             system_prompt="Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders.",
             temperature=0.2, max_tokens=8000,
@@ -292,7 +292,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             "### archivo: ruta/archivo.ext\n"
             "Código completo. Sin placeholders ni '...'."
         )
-        response = self.client.chat(
+        response = self._chat(
             prompt,
             system_prompt="Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo.",
             temperature=0.3, max_tokens=8000,
@@ -425,6 +425,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
 
         written_paths: Dict[str, Path] = {}
         written_files: List[str] = []
+        failed_paths: set = set()
         log_entries: List[str] = []
         tokens_total = 0
         files_since_replan = 0
@@ -437,7 +438,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             fm = file_map()
             return [
                 p for p in paths
-                if p not in written_paths and p in fm
+                if p not in written_paths and p not in failed_paths and p in fm
                 and all(d in written_paths for d in fm[p].get("depends_on", []))
             ]
 
@@ -496,22 +497,35 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 for result in batch_results:
                     done += 1
                     tokens_total += result["tokens"]
+                    log_entries.append(self._format_log_entry(result["log"]))
+                    if result.get("failed"):
+                        with paths_lock:
+                            failed_paths.add(result["path"])
+                        self._progress(f"{done}/{total}  ⚠️  {result['path']} (falló, se continúa)")
+                        continue
                     with paths_lock:
                         written_paths[result["path"]] = Path(result["filepath"])
                         if result["filepath"] not in written_files:
                             written_files.append(result["filepath"])
-                    log_entries.append(self._format_log_entry(result["log"]))
                     files_since_replan += 1
                     self._progress(f"{done}/{total}  {result['path']}")
 
+        if failed_paths:
+            log_entries.append(
+                f"## FAILED FILES ({len(failed_paths)})\n"
+                + "\n".join(f"- {p}" for p in sorted(failed_paths))
+            )
+
         return {
             "files_written": written_files,
+            "failed_files": sorted(failed_paths),
             "tokens_used": tokens_total,
             "build_log": "\n".join(log_entries),
             "build_state": build_state.to_dict(),
             "plan": plan,
             "summary": (
                 f"adaptive build: {len(written_files)} files, "
+                f"{len(failed_paths)} failed, "
                 f"{tokens_total} tokens, {len(build_state.mistakes)} mistakes tracked"
             ),
         }
@@ -531,8 +545,30 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 for path in batch
             }
             for fut in as_completed(futures):
-                results.append(fut.result())
+                path = futures[fut]
+                try:
+                    results.append(fut.result())
+                except Exception as e:
+                    _dbg.log("AGENT", f"future_failed  file={path}  error={e}")
+                    results.append(self._failed_file_result(path, "?", str(e)))
         return results
+
+    @staticmethod
+    def _failed_file_result(path: str, pass_name: str, error: str) -> Dict:
+        return {
+            "path": path,
+            "filepath": None,
+            "tokens": 0,
+            "log": {
+                "path": path,
+                "pass": pass_name,
+                "review": f"FAILED: {error[:120]}",
+                "severity": "high",
+                "retries": 0,
+                "replan": False,
+            },
+            "failed": True,
+        }
 
     def _process_file(
         self, task: str, plan: Dict, project_dir: Path,
@@ -543,35 +579,44 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         pass_name: str,
     ) -> Dict:
         _dbg.log("AGENT", f"pass={pass_name}  file={rel_path}")
-        context = build_generation_context(
-            task, plan, entry, project_dir, written_paths,
-            scaffold_mode=scaffold_mode, build_state=build_state,
-        )
-        code, tokens = self._generate_file(context, rel_path, build_state)
-        filepath = self.file_writer.write_file(project_dir, rel_path, code)
-
-        log = {
-            "path": rel_path,
-            "pass": pass_name,
-            "review": "skipped (trivial)",
-            "severity": "-",
-            "retries": 0,
-            "replan": False,
-        }
-        extra_tokens = 0
-
-        if not is_trivial_file(rel_path, entry.get("description", "")):
-            code, extra_tokens, log = self._apply_review_actions(
-                rel_path, code, entry, task, context, build_state, log,
+        try:
+            context = build_generation_context(
+                task, plan, entry, project_dir, written_paths,
+                scaffold_mode=scaffold_mode, build_state=build_state,
             )
+            code, tokens = self._generate_file(context, rel_path, build_state)
             filepath = self.file_writer.write_file(project_dir, rel_path, code)
 
-        return {
-            "path": rel_path,
-            "filepath": str(filepath),
-            "tokens": tokens + extra_tokens,
-            "log": log,
-        }
+            log = {
+                "path": rel_path,
+                "pass": pass_name,
+                "review": "skipped (trivial)",
+                "severity": "-",
+                "retries": 0,
+                "replan": False,
+            }
+            extra_tokens = 0
+
+            if not is_trivial_file(rel_path, entry.get("description", "")):
+                code, extra_tokens, log = self._apply_review_actions(
+                    rel_path, code, entry, task, context, build_state, log,
+                )
+                filepath = self.file_writer.write_file(project_dir, rel_path, code)
+
+            return {
+                "path": rel_path,
+                "filepath": str(filepath),
+                "tokens": tokens + extra_tokens,
+                "log": log,
+            }
+        except Exception as e:
+            # Un fallo en un archivo no debe abortar el build completo.
+            _dbg.log("AGENT", f"file_failed  file={rel_path}  error={e}")
+            build_state.absorb_review(rel_path, {
+                "severity": "high",
+                "issues": [{"problem": f"generación falló: {str(e)[:200]}"}],
+            })
+            return self._failed_file_result(rel_path, pass_name, str(e))
 
     def _apply_review_actions(
         self, path: str, code: str, entry: Dict, task: str,
@@ -805,7 +850,7 @@ SNIPPETS:
 JSON:
 {{"overall_score":1-10,"success":true/false,"issues":[],"positives":[],"suggestions":[]}}
 """
-        response = self.client.chat(
+        response = self._chat(
             prompt,
             system_prompt=_FINAL_REVIEW_SYSTEM,
             temperature=0.2,

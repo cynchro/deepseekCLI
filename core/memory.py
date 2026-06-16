@@ -83,26 +83,6 @@ class DeepSeekMemory:
         except Exception:
             return [{"pattern": "No se pudieron identificar patrones"}]
 
-    def predict_success(self, context: str, proposed_action: str) -> Dict:
-        similar = self._find_similar(context)
-        if not similar:
-            return {"probability": 0.5, "confidence": 0.3, "based_on": "Sin experiencias previas"}
-        summary = "\n".join(
-            f"- {exp['context'][:80]} | éxito={exp['success']} | {exp.get('lesson','')[:80]}"
-            for exp in similar[:5]
-        )
-        response = self.client.chat(
-            f"Experiencias previas:\n{summary}\n\nContexto: {context[:200]}\nAcción: {proposed_action[:200]}\n\n"
-            'Predice probabilidad de éxito. JSON: {"probability":0-1,"confidence":0-1,"risks":[],"recommendations":[]}',
-            system_prompt="Eres un predictor experto. Responde JSON.",
-            temperature=0.2, max_tokens=300,
-            model_override=self.model,
-        )
-        try:
-            return json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))
-        except Exception:
-            return {"probability": 0.5, "confidence": 0.3, "risks": [], "recommendations": []}
-
     def _find_similar(self, context: str, top_k: int = 5) -> List[Dict]:
         if not self.experiences:
             return []
