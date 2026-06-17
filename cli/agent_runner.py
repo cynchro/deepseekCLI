@@ -27,6 +27,8 @@ def _printer(kind: str, data: dict):
     if kind == "tool_call":
         print(f"  {_C['cyan']}⚙ {data['name']}{_C['reset']} "
               f"{_C['dim']}{_fmt_args(data['name'], data['args'])}{_C['reset']}")
+    elif kind == "build":
+        print(f"    {_C['dim']}↳ {data['action']} con flash…{_C['reset']}")
     elif kind == "tool_result":
         first = (data["result"].splitlines() or [""])[0]
         color = _C["red"] if first.startswith("ERROR") else _C["dim"]

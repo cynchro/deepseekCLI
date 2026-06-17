@@ -133,8 +133,11 @@ calling nativo, permisos vía `ctx.confirm`, telemetría). Enganchado: `cli/agen
 edita quirúrgicamente y corre código real. Pendiente (Fase 3): hacerlo el handler por
 defecto del input natural.
 
-**Fase 2 — Orquestación Pro/Flash**
-Tools de construcción enrutan a FLASH; loop + review a PRO. Telemetría de tokens por modelo.
+**Fase 2 — Orquestación Pro/Flash** ✅ HECHA. `core/builder.py` (CodeBuilder: usa el
+MISMO client que el loop, pasando model=FLASH) + tools `generate_code`/`apply_edit`
+(`core/tools/build.py`) que delegan la generación pesada a FLASH; el loop sigue en PRO.
+System prompt guía a PRO a delegar. Telemetría por modelo ya mostraba ambos. Verificado
+e2e: PRO orquestó, FLASH generó calc.py+tests, tests verdes, by_model = {pro, flash}.
 
 **Fase 3 — Capa "Claude"**
 `DEEP.md` + `/init`, skills agénticas + `/skill`, permisos + modos, slash commands.
@@ -197,4 +200,5 @@ cherry-pickea como utilidades; el planner queda como sub-flujo opcional, no como
 - [x] `PLAN.md` (este archivo).
 - [x] Fase 0 — `core/models.py`, `core/router.py`, `core/client.py` extendido. Verificado (smoke test + imports + compile).
 - [x] Fase 1 — `core/tools/` (fs/search/shell) + `core/agent_loop.py` + `cli/agent_runner.py` + comando `agent`. Verificado e2e real (crea/edita/corre código).
-- [ ] Fase 2 — orquestación Pro/Flash: tools `generate_code`/`apply_edit` que enrutan a FLASH; el loop sigue en PRO. Telemetría ya lista.
+- [x] Fase 2 — orquestación Pro/Flash: `core/builder.py` + tools `generate_code`/`apply_edit` → FLASH; loop en PRO. Verificado e2e (by_model = {pro, flash}, tests verdes).
+- [ ] Fase 3 — capa "Claude": `DEEP.md` + `/init`, skills agénticas + `/skill`, permisos + modos, slash commands, agente como handler por defecto del input natural.

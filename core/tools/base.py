@@ -12,6 +12,7 @@ class ToolContext:
     workspace: Path
     on_event: Callable[[str, dict], None] = lambda kind, data: None
     confirm: Callable[[str], bool] = lambda desc: True
+    builder: object = None  # CodeBuilder (FLASH) para generate_code / apply_edit
 
 
 def safe_path(ctx: ToolContext, path: str) -> Path:

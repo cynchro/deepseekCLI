@@ -10,18 +10,26 @@ from pathlib import Path
 from typing import Callable, List
 
 import core.debug as _dbg
+from core.builder import CodeBuilder
 from core.client import DeepSeekClient
-from core.models import MODEL_PRO
+from core.models import MODEL_FLASH, MODEL_PRO
 from core.tools import schemas, dispatch
 from core.tools.base import ToolContext
 
 DEFAULT_SYSTEM = """Sos deep, un agente de programación que trabaja en una terminal.
 Resolvés la tarea del usuario operando sobre el workspace con herramientas.
 
+Tenés dos clases de herramientas para escribir:
+- generate_code / apply_edit → las maneja un modelo de construcción rápido (FLASH).
+  USALAS para producir o modificar CÓDIGO real: vos describís qué hacer y FLASH
+  escribe los bytes. Es más rápido y barato; no escribas el código vos mismo.
+- write_file / edit_file → para contenido EXACTO y trivial que ya tenés resuelto
+  (configs cortas, un renombre puntual, un .gitignore).
+
 Reglas de trabajo:
-- Antes de editar un archivo, leelo con read_file. Nunca inventes su contenido.
-- Para cambios chicos usá edit_file (reemplazo de string exacto), NO reescribas el archivo entero.
-- Para archivos nuevos usá write_file.
+- Para crear un archivo con lógica: generate_code con una spec clara.
+- Para modificar código existente: apply_edit con instrucciones en lenguaje natural.
+- Antes de tocar a mano un archivo con edit_file, leelo con read_file. Nunca inventes su contenido.
 - Explorá con list_dir, glob y grep antes de asumir la estructura del proyecto.
 - Para correr tests, comandos o git usá run_command.
 - Trabajás SOLO dentro del workspace.
@@ -42,10 +50,14 @@ class AgentLoop:
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.on_event = on_event or (lambda kind, data: None)
         self.max_steps = max_steps
+        # FLASH construye; comparte el mismo client que PRO para que get_stats()
+        # agregue el gasto de ambos modelos.
+        self.builder = CodeBuilder(self.client, model=MODEL_FLASH, rules=rules)
         self.ctx = ToolContext(
             workspace=self.workspace,
             on_event=self.on_event,
             confirm=confirm or (lambda desc: True),
+            builder=self.builder,
         )
         sys_prompt = system_prompt or DEFAULT_SYSTEM
         sys_prompt += f"\n\nWorkspace: {self.workspace}"
