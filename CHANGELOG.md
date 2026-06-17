@@ -7,6 +7,26 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-17
+
+Escala a proyectos grandes con dos patrones de Claude Code: lista de tareas
+persistente y subagentes.
+
+### Added
+- **Lista de tareas persistente** (`.deep/tasks.json`): el agente descompone el
+  trabajo con `write_tasks` y marca el progreso con `update_task`. Se inyecta al
+  arrancar, así un build grande sobrevive al límite de pasos, al `continuá` y al
+  reinicio. Comando `/tasks` y vista en vivo en la consola.
+- **Subagentes** (`spawn_agent`): el agente delega una parte grande y autocontenida
+  a un sub-agente con contexto fresco, que devuelve un resumen compacto — el
+  orquestador se mantiene liviano. Comparte cliente (telemetría), workspace y
+  permisos; con guardas de profundidad (`max_depth`) y aislamiento del plan global
+  (los sub-agentes no tocan `.deep/tasks.json`).
+
+Validado en un build real: una API REST en FastAPI (JWT, SQLite, módulos de
+usuarios/proyectos/tareas, tests) — 11/11 tareas, 33 tests en verde, ~$0.05 (95%
+de prompt cache hits en el orquestador).
+
 ## [0.2.0] - 2026-06-17
 
 `deep` evoluciona de un **generador single-shot** a un **agente de programación
@@ -95,7 +115,8 @@ modelos DeepSeek **PRO (decide) / FLASH (construye)**.
 - Primera versión open source: pipeline de generación, heurísticas de evaluación
   y validación del proyecto generado.
 
-[Unreleased]: https://github.com/cynchro/deepseekCLI/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cynchro/deepseekCLI/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cynchro/deepseekCLI/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cynchro/deepseekCLI/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/cynchro/deepseekCLI/compare/v0.1.1...v0.1.3
 [0.1.1]: https://github.com/cynchro/deepseekCLI/compare/v0.1.0...v0.1.1
