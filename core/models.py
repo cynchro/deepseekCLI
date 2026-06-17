@@ -33,16 +33,23 @@ DEPRECATED_MODELS = {
     "deepseek-reasoner": MODEL_PRO,     # modo thinking
 }
 
-# Precio USD por 1M tokens (input cache miss / output). Fuente: api-docs 2026-06-17.
+# Precio USD por 1M tokens (input cache miss / input cache hit / output).
+# Fuente: api-docs 2026-06-17.
 PRICING = {
-    MODEL_PRO:   {"input": 0.435, "output": 0.87},
-    MODEL_FLASH: {"input": 0.14,  "output": 0.28},
+    MODEL_PRO:   {"input": 0.435, "cache_hit": 0.003625, "output": 0.87},
+    MODEL_FLASH: {"input": 0.14,  "cache_hit": 0.0028,   "output": 0.28},
 }
 
 
-def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Costo estimado (USD) de una llamada — cota superior, ignora cache hits."""
+def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int,
+                  cache_hit_tokens: int = 0) -> float:
+    """Costo estimado (USD) de una llamada, contemplando el prompt caching:
+    los tokens de prefijo cacheado se cobran ~100x más barato."""
     p = PRICING.get(model)
     if not p:
         return 0.0
-    return prompt_tokens / 1e6 * p["input"] + completion_tokens / 1e6 * p["output"]
+    hit = max(int(cache_hit_tokens), 0)
+    miss = max(prompt_tokens - hit, 0)
+    return (hit / 1e6 * p["cache_hit"]
+            + miss / 1e6 * p["input"]
+            + completion_tokens / 1e6 * p["output"])

@@ -154,10 +154,12 @@ class _Repl:
             print("  Sin actividad todavía.")
             return
         st = self.agent.client.get_stats()
+        cache = st.get("cache_hit_tokens", 0)
         print(f"  Llamadas: {st['successful_calls']}  ·  tokens: {st['total_tokens_used']}"
-              f"  ·  costo estimado: ${st['estimated_cost_usd']:.4f}")
+              f"  ·  cache hits: {cache}  ·  costo estimado: ${st['estimated_cost_usd']:.4f}")
         for m, v in st.get("by_model", {}).items():
-            print(f"    {m}: {v['calls']} llamadas · {v['tokens']} tok · ${v['cost_usd']:.4f}")
+            print(f"    {m}: {v['calls']} llamadas · {v['tokens']} tok"
+                  f" · {v.get('cache_hit_tokens', 0)} cacheados · ${v['cost_usd']:.4f}")
 
     def _rules(self):
         rules = load_rules(self.cwd / ".deeprules")

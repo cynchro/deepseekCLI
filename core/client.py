@@ -91,6 +91,7 @@ class DeepSeekClient:
                     "tokens_used": usage.get("total_tokens", 0),
                     "prompt_tokens": usage.get("prompt_tokens", 0),
                     "completion_tokens": usage.get("completion_tokens", 0),
+                    "cache_hit_tokens": usage.get("prompt_cache_hit_tokens", 0),
                     "success": True,
                 })
                 return {
@@ -195,13 +196,19 @@ class DeepSeekClient:
         total_tokens = sum(c.get("tokens_used", 0) for c in successful)
         by_model: Dict[str, Dict] = {}
         total_cost = 0.0
+        total_cache_hit = 0
         for c in successful:
             m = c.get("model", "?")
-            cost = estimate_cost(m, c.get("prompt_tokens", 0), c.get("completion_tokens", 0))
+            ch = c.get("cache_hit_tokens", 0)
+            cost = estimate_cost(m, c.get("prompt_tokens", 0),
+                                 c.get("completion_tokens", 0), ch)
             total_cost += cost
-            entry = by_model.setdefault(m, {"calls": 0, "tokens": 0, "cost_usd": 0.0})
+            total_cache_hit += ch
+            entry = by_model.setdefault(
+                m, {"calls": 0, "tokens": 0, "cache_hit_tokens": 0, "cost_usd": 0.0})
             entry["calls"] += 1
             entry["tokens"] += c.get("tokens_used", 0)
+            entry["cache_hit_tokens"] += ch
             entry["cost_usd"] = round(entry["cost_usd"] + cost, 6)
         return {
             "total_calls": len(self.call_history),
@@ -210,5 +217,6 @@ class DeepSeekClient:
             "total_tokens_used": total_tokens,
             "average_tokens_per_call": total_tokens / max(len(successful), 1),
             "estimated_cost_usd": round(total_cost, 6),
+            "cache_hit_tokens": total_cache_hit,
             "by_model": by_model,
         }

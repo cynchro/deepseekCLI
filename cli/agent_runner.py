@@ -38,6 +38,9 @@ def _printer(kind: str, data: dict):
               f"{_C['dim']}{_fmt_args(data['name'], data['args'])}{_C['reset']}")
     elif kind == "build":
         print(f"    {_C['dim']}↳ {data['action']} con flash…{_C['reset']}")
+    elif kind == "compact":
+        print(f"  {_C['dim']}🗜  contexto compactado (~{data.get('tokens_before',0)}→"
+              f"{data.get('tokens_after',0)} tok){_C['reset']}")
     elif kind == "tool_result":
         first = (data["result"].splitlines() or [""])[0]
         color = _C["red"] if first.startswith("ERROR") else _C["dim"]

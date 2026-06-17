@@ -43,13 +43,14 @@ class AgentLoop:
                  rules: List[str] = None, project_context: str = None,
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
-                 max_steps: int = 40):
+                 max_steps: int = 40, compact_threshold: int = 60000):
         self.client = client
         self.model = model
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.on_event = on_event or (lambda kind, data: None)
         self.max_steps = max_steps
+        self.compact_threshold = compact_threshold
         # FLASH construye; comparte el mismo client que PRO para que get_stats()
         # agregue el gasto de ambos modelos.
         self.builder = CodeBuilder(self.client, model=MODEL_FLASH, rules=rules)
@@ -72,11 +73,48 @@ class AgentLoop:
         """Reinicia la conversación preservando el system prompt."""
         self.messages = self.messages[:1]
 
+    def _approx_tokens(self) -> int:
+        return sum(len(m.get("content") or "") for m in self.messages) // 4
+
+    def _compact_if_needed(self):
+        """Si el historial crece demasiado, resume los turnos viejos con FLASH y
+        los reemplaza por una nota, preservando system + último turno. Corta en
+        límites de mensaje 'user' (nunca parte un grupo tool_calls/tool)."""
+        if self._approx_tokens() < self.compact_threshold:
+            return
+        user_idx = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
+        if len(user_idx) < 2:
+            return  # no hay turnos viejos que resumir de forma segura
+        cut = user_idx[-1]
+        head = self.messages[1:cut]
+        convo = "\n".join(
+            f"{m['role'].upper()}: {(m.get('content') or '')[:1500]}"
+            for m in head if m["role"] in ("user", "assistant") and m.get("content")
+        )
+        if not convo:
+            return
+        res = self.client.complete(
+            [{"role": "system", "content":
+              "Resumí esta sesión de trabajo preservando decisiones, archivos "
+              "creados/modificados con sus rutas, y lo que quede pendiente. Conciso."},
+             {"role": "user", "content": convo}],
+            model=MODEL_FLASH, temperature=0.2, max_tokens=1000,
+        )
+        if not res.get("success"):
+            return
+        before = self._approx_tokens()
+        summary = {"role": "assistant",
+                   "content": "[Resumen de la sesión anterior]\n" + res["content"]}
+        self.messages = [self.messages[0], summary] + self.messages[cut:]
+        self.on_event("compact", {"tokens_before": before, "tokens_after": self._approx_tokens()})
+        _dbg.log("AGENT", f"compactado  {before} -> {self._approx_tokens()} tokens aprox")
+
     def run(self, user_input: str) -> dict:
         """Procesa un turno del usuario hasta la respuesta final (sin tool calls)."""
         self.messages.append({"role": "user", "content": user_input})
         self.on_event("user", {"content": user_input})
         _dbg.log("AGENT", f"run  task={user_input[:120]}  model={self.model}")
+        self._compact_if_needed()
 
         for step in range(self.max_steps):
             resp = self.client.complete(

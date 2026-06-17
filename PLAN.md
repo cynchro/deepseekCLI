@@ -157,9 +157,13 @@ vivo + costo por modelo. Bug arreglado de raíz: el middleware `log_requests` re
 no consume el body. Verificado e2e (TestClient): /api/agent streaming + /api/ask + /api/run +
 /api/health, todos OK; shell remoto bloqueado.
 
-**Fase 5 — Pulido**
-Compactación de contexto (ya existe `compact_history`), subagentes opcionales, y decidir
-si el single-shot `_plan/_execute` queda como "fast path" o se retira.
+**Fase 5 — Pulido** ✅ (núcleo HECHO). Compactación de contexto en el AgentLoop
+(`_compact_if_needed`: resume turnos viejos con FLASH en límites de mensaje 'user', sin
+romper grupos tool_calls/tool; umbral configurable). Costo preciso con prompt caching:
+`PRICING` con precio cache-hit, `estimate_cost` contempla tokens cacheados, el cliente
+captura `prompt_cache_hit_tokens`, `/cost` los muestra. Verificado: caching real activo
+(4096/6582 tok cacheados en un run). Pendiente opcional: subagentes; el single-shot
+`system.py` queda como fast-path del `build` legacy/PWA (no se retira).
 
 ---
 
@@ -175,12 +179,15 @@ si el single-shot `_plan/_execute` queda como "fast path" o se retira.
 
 ## 8. Definición de "estable" (criterio de salida v2.0)
 
-- [ ] El loop con tools edita un proyecto existente **sin regenerar archivos enteros**.
-- [ ] Split Pro/Flash funcionando, con telemetría de tokens por modelo.
-- [ ] Permisos: confirma antes de tocar disco/shell.
-- [ ] `DEEP.md` se carga (global + proyecto).
-- [ ] La PWA anda igual o mejor.
-- [ ] Comandos legacy siguen respondiendo.
+- [x] El loop con tools edita un proyecto existente **sin regenerar archivos enteros** (edit_file / apply_edit).
+- [x] Split Pro/Flash funcionando, con telemetría de tokens y costo por modelo.
+- [x] Permisos: confirma antes de tocar disco/shell (+ opción 'a' / modos ask/auto/plan/yolo).
+- [x] `DEEP.md` se carga (global + proyecto).
+- [x] La PWA anda igual o mejor (agente en streaming + fix de estabilidad del middleware).
+- [x] Comandos legacy siguen respondiendo (CLI subcomandos + endpoints PWA).
+
+**→ v2 cumple la definición de estable.** Falta opcional: subagentes, retiro del single-shot,
+y mergear `v2` → `main` + version bump.
 
 ---
 
@@ -214,4 +221,4 @@ cherry-pickea como utilidades; el planner queda como sub-flujo opcional, no como
 - [x] Fase 2 — orquestación Pro/Flash: `core/builder.py` + tools `generate_code`/`apply_edit` → FLASH; loop en PRO. Verificado e2e (by_model = {pro, flash}, tests verdes).
 - [x] Fase 3 — capa "Claude": REPL agente-first (`cli/agent_repl.py`), `DEEP.md` + `/init` (`core/context.py`), permisos/modos (ask/auto/plan/yolo), slash commands, `/skill`. Verificado e2e.
 - [x] Fase 4 — PWA: `/api/agent` SSE + toggle 🤖 Agente en el front + permiso remoto (shell gated). Fix middleware. Verificado e2e (TestClient): agent + legacy intactos.
-- [ ] Fase 5 — pulido: compactación de contexto, prompt caching para el input de PRO, subagentes, retiro del single-shot.
+- [x] Fase 5 — pulido (núcleo): compactación de contexto + costo con prompt caching (verificado real). Opcionales (subagentes) y retiro del single-shot: diferidos.
