@@ -163,8 +163,13 @@ no consume el body. Verificado e2e (TestClient): /api/agent streaming + /api/ask
   (`core/tools/tasks.py`). El loop inyecta el plan pendiente al arrancar (sobrevive al
   tope de pasos, al 'continuá' y al reinicio); system prompt guía a descomponer y marcar
   progreso; consola muestra el plan en vivo; slash `/tasks`. Verificado e2e.
-- ⏳ Subagentes: PRO delega cada tarea a un sub-agente con contexto fresco (el AgentLoop
-  es la unidad reutilizable); opcional paralelismo.
+- ✅ Subagentes: tool `spawn_agent` (`core/tools/subagent.py`) + `AgentLoop._spawn_subagent`.
+  PRO delega una tarea autocontenida a un AgentLoop hijo con contexto fresco; el hijo trabaja
+  solo y devuelve un resumen compacto (no su transcript) → el contexto del padre queda liviano.
+  Comparte client (telemetría), workspace y permisos. Guards: `max_depth=2`, los sub-agentes
+  no tocan el plan global (`.deep/tasks.json` excluido) ni anidan de más. Display anidado
+  (↪/↩). Verificado e2e: PRO delegó 2 módulos, los hijos los construyeron, padre no usó
+  generate_code/write_file. Pendiente opcional: paralelismo (hoy secuencial).
 
 **Fase 5 — Pulido** ✅ (núcleo HECHO). Compactación de contexto en el AgentLoop
 (`_compact_if_needed`: resume turnos viejos con FLASH en límites de mensaje 'user', sin

@@ -1,15 +1,17 @@
 """Registry de tools del agente: schemas para la API + dispatch de ejecución."""
-from core.tools import fs, search, shell, build, tasks
+from core.tools import fs, search, shell, build, tasks, subagent
 from core.tools.base import ToolContext  # noqa: F401 (re-export)
 
 _REGISTRY = {}
-for _mod in (fs, search, shell, build, tasks):
+for _mod in (fs, search, shell, build, tasks, subagent):
     _REGISTRY.update(_mod.TOOLS)
 
 
-def schemas() -> list:
-    """Lista de definiciones de tools en formato OpenAI (para pasar a complete())."""
-    return [{"type": "function", "function": t["schema"]} for t in _REGISTRY.values()]
+def schemas(exclude=None) -> list:
+    """Definiciones de tools en formato OpenAI. `exclude` filtra por nombre."""
+    ex = set(exclude or ())
+    return [{"type": "function", "function": t["schema"]}
+            for n, t in _REGISTRY.items() if n not in ex]
 
 
 def tool_names() -> list:

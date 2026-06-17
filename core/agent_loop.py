@@ -32,6 +32,10 @@ Para trabajos con varios pasos o proyectos grandes:
 - Marcá cada tarea con update_task: in_progress cuando la empezás, completed cuando la
   terminás (o failed si no se pudo). Así no repetís trabajo y se puede retomar si te cortan.
 - Si el plan cambia en el camino, volvé a llamar write_tasks con la lista actualizada.
+- Para una parte grande y autocontenida (ej. un módulo, un subsistema), delegala con
+  spawn_agent: un sub-agente la construye con su propio contexto y te devuelve un resumen.
+  Así tu contexto se mantiene liviano. Pasale una tarea clara y completa (no ve tu charla).
+  Las tareas chicas hacelas vos directo, sin delegar.
 
 Reglas de trabajo:
 - Para crear un archivo con lógica: generate_code con una spec clara.
@@ -50,7 +54,8 @@ class AgentLoop:
                  rules: List[str] = None, project_context: str = None,
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
-                 max_steps: int = 100, compact_threshold: int = 150000):
+                 max_steps: int = 100, compact_threshold: int = 150000,
+                 depth: int = 0, max_depth: int = 2, is_subagent: bool = False):
         self.client = client
         self.model = model
         self.workspace = Path(workspace)
@@ -58,6 +63,11 @@ class AgentLoop:
         self.on_event = on_event or (lambda kind, data: None)
         self.max_steps = max_steps
         self.compact_threshold = compact_threshold
+        self.depth = depth
+        self.max_depth = max_depth
+        self.is_subagent = is_subagent
+        self._rules = rules
+        self._project_context = project_context
         # FLASH construye; comparte el mismo client que PRO para que get_stats()
         # agregue el gasto de ambos modelos.
         self.builder = CodeBuilder(self.client, model=MODEL_FLASH, rules=rules)
@@ -66,7 +76,16 @@ class AgentLoop:
             on_event=self.on_event,
             confirm=confirm or (lambda desc: True),
             builder=self.builder,
+            spawn=self._spawn_subagent,
         )
+        # Tools excluidas: los sub-agentes no tocan el plan global (.deep/tasks.json)
+        # y no anidan más allá de max_depth.
+        self.tools_exclude = set()
+        if is_subagent:
+            self.tools_exclude |= {"write_tasks", "update_task"}
+        if depth >= max_depth:
+            self.tools_exclude.add("spawn_agent")
+
         sys_prompt = system_prompt or DEFAULT_SYSTEM
         sys_prompt += f"\n\nWorkspace: {self.workspace}"
         if rules:
@@ -74,12 +93,49 @@ class AgentLoop:
                 "\n".join(f"- {r}" for r in rules)
         if project_context:
             sys_prompt += "\n\n" + project_context
-        td = _taskstore.load_tasks(self.workspace)
-        if _taskstore.has_open(td):
-            sys_prompt += ("\n\nTAREAS EN CURSO (de una sesión anterior, .deep/tasks.json) — "
-                           "continuá desde acá, no rehagas lo completado:\n"
-                           + _taskstore.render(td))
+        if not is_subagent:
+            td = _taskstore.load_tasks(self.workspace)
+            if _taskstore.has_open(td):
+                sys_prompt += ("\n\nTAREAS EN CURSO (de una sesión anterior, .deep/tasks.json) — "
+                               "continuá desde acá, no rehagas lo completado:\n"
+                               + _taskstore.render(td))
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
+
+    def _spawn_subagent(self, task: str, context_files=None) -> str:
+        """Lanza un AgentLoop hijo con contexto fresco para una tarea autocontenida.
+        Comparte client (telemetría), workspace y permisos. Devuelve un resumen
+        compacto a PRO — no su transcript — para mantener liviano el contexto del padre."""
+        if self.depth >= self.max_depth:
+            return "ERROR: no se pueden anidar más sub-agentes (max_depth)"
+        touched = []
+
+        def child_event(kind, data):
+            if kind in ("file_write", "file_edit"):
+                touched.append(data.get("path"))
+            self.on_event(kind, data)   # se muestran anidados entre los brackets
+
+        child = AgentLoop(
+            self.client, self.workspace, model=self.model,
+            rules=self._rules, project_context=self._project_context,
+            on_event=child_event, confirm=self.ctx.confirm,
+            max_steps=self.max_steps, compact_threshold=self.compact_threshold,
+            depth=self.depth + 1, max_depth=self.max_depth, is_subagent=True,
+        )
+        seed = task
+        if context_files:
+            seed += "\n\nArchivos relevantes para leer primero: " + ", ".join(context_files)
+        self.on_event("subagent_start", {"task": task[:160], "depth": self.depth + 1})
+        _dbg.log("AGENT", f"spawn subagent  depth={self.depth + 1}  task={task[:100]}")
+        res = child.run(seed)
+        files = list(dict.fromkeys(t for t in touched if t))
+        self.on_event("subagent_done", {"success": res.get("success"),
+                                         "files": files, "depth": self.depth + 1})
+        head = "Sub-agente completó la tarea." if res.get("success") else \
+            "Sub-agente NO completó la tarea (revisá)."
+        summary = head + "\n" + (res.get("content") or "")[:1500]
+        if files:
+            summary += "\nArchivos tocados: " + ", ".join(files)
+        return summary
 
     def reset(self):
         """Reinicia la conversación preservando el system prompt."""
@@ -142,7 +198,8 @@ class AgentLoop:
             self._compact_if_needed()   # también a mitad de un build largo
             resp = self.client.complete(
                 self.messages, model=self.model,
-                tools=schemas(), temperature=0.3, max_tokens=8000,
+                tools=schemas(exclude=self.tools_exclude),
+                temperature=0.3, max_tokens=8000,
             )
             if not resp.get("success"):
                 self.on_event("error", {"error": resp.get("error", "?")})

@@ -42,6 +42,13 @@ def _printer(kind: str, data: dict):
         from core.tasks import render
         body = render(data["data"]).replace("\n", "\n  ")
         print(f"  {_C['cyan']}📋 plan{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}")
+    elif kind == "subagent_start":
+        print(f"  {_C['green']}↪ sub-agente:{_C['reset']} {data.get('task','')[:80]}")
+    elif kind == "subagent_done":
+        files = data.get("files") or []
+        icon = "↩" if data.get("success") else "↩ ⚠"
+        extra = f" ({len(files)} archivos)" if files else ""
+        print(f"  {_C['green']}{icon} sub-agente listo{extra}{_C['reset']}")
     elif kind == "compact":
         print(f"  {_C['dim']}🗜  contexto compactado (~{data.get('tokens_before',0)}→"
               f"{data.get('tokens_after',0)} tok){_C['reset']}")
