@@ -210,7 +210,11 @@ def main():
         if notice:
             print(notice)
     else:
-        from cli.repl import run
+        # REPL agente-first (v2). El clásico queda en `cli.repl` como fallback.
+        if os.getenv("DEEP_CLASSIC_REPL"):
+            from cli.repl import run
+        else:
+            from cli.agent_repl import run
         run(_require_api_key(), update_notice=_update.get(timeout=1.5))
 
 

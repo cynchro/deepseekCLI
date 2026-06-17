@@ -4,6 +4,15 @@ from pathlib import Path
 
 from core.client import DeepSeekClient
 from core.agent_loop import AgentLoop
+from core.context import load_project_context
+
+MODES = ("ask", "auto", "plan", "yolo")
+_MODE_HELP = {
+    "ask":  "pide permiso para escribir y ejecutar (default)",
+    "auto": "acepta ediciones de archivos; pregunta para shell",
+    "plan": "solo lectura: bloquea escrituras y shell",
+    "yolo": "acepta todo sin preguntar",
+}
 
 _C = {
     "dim": "\033[2m", "green": "\033[32m", "yellow": "\033[33m",
@@ -35,7 +44,7 @@ def _printer(kind: str, data: dict):
         print(f"    {color}↳ {first[:100]}{_C['reset']}")
 
 
-def _confirm(desc: str) -> bool:
+def _ask(desc: str) -> bool:
     try:
         ans = input(f"  {_C['yellow']}¿Permitir {desc}? [s/N]{_C['reset']} ").strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -44,11 +53,38 @@ def _confirm(desc: str) -> bool:
     return ans in ("s", "si", "sí", "y", "yes")
 
 
-def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False) -> AgentLoop:
+class Permissions:
+    """Gate de permisos con modo mutable. Clasifica la acción por el texto del
+    pedido (las tools llaman ctx.confirm('ejecutar: ...') para shell)."""
+
+    def __init__(self, mode: str = "ask", prompt=_ask):
+        self.mode = mode if mode in MODES else "ask"
+        self._prompt = prompt
+
+    def __call__(self, desc: str) -> bool:
+        is_shell = desc.startswith("ejecutar")
+        if self.mode == "plan":
+            return False              # solo lectura
+        if self.mode == "yolo":
+            return True
+        if self.mode == "auto":
+            return self._prompt(desc) if is_shell else True
+        return self._prompt(desc)     # ask
+
+
+def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
+               mode: str = None, model=None) -> AgentLoop:
     workspace = Path(workspace) if workspace else Path.cwd()
     client = DeepSeekClient(api_key)
-    confirm = (lambda desc: True) if auto else _confirm
-    return AgentLoop(client, workspace, rules=rules, on_event=_printer, confirm=confirm)
+    perms = Permissions(mode="yolo" if auto else (mode or "ask"))
+    kwargs = {"model": model} if model else {}
+    loop = AgentLoop(
+        client, workspace, rules=rules,
+        project_context=load_project_context(workspace),
+        on_event=_printer, confirm=perms, **kwargs,
+    )
+    loop.permissions = perms          # para que el REPL pueda cambiar el modo
+    return loop
 
 
 def run_turn(loop: AgentLoop, task: str) -> dict:

@@ -40,7 +40,7 @@ Reglas de trabajo:
 class AgentLoop:
     def __init__(self, client: DeepSeekClient, workspace, *,
                  model: str = MODEL_PRO, system_prompt: str = None,
-                 rules: List[str] = None,
+                 rules: List[str] = None, project_context: str = None,
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
                  max_steps: int = 40):
@@ -64,7 +64,13 @@ class AgentLoop:
         if rules:
             sys_prompt += "\n\nREGLAS DEL PROYECTO (.deeprules):\n" + \
                 "\n".join(f"- {r}" for r in rules)
+        if project_context:
+            sys_prompt += "\n\n" + project_context
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
+
+    def reset(self):
+        """Reinicia la conversación preservando el system prompt."""
+        self.messages = self.messages[:1]
 
     def run(self, user_input: str) -> dict:
         """Procesa un turno del usuario hasta la respuesta final (sin tool calls)."""

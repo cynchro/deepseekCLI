@@ -139,8 +139,14 @@ MISMO client que el loop, pasando model=FLASH) + tools `generate_code`/`apply_ed
 System prompt guía a PRO a delegar. Telemetría por modelo ya mostraba ambos. Verificado
 e2e: PRO orquestó, FLASH generó calc.py+tests, tests verdes, by_model = {pro, flash}.
 
-**Fase 3 — Capa "Claude"**
-`DEEP.md` + `/init`, skills agénticas + `/skill`, permisos + modos, slash commands.
+**Fase 3 — Capa "Claude"** ✅ HECHA. REPL agente-first `cli/agent_repl.py` (texto natural
+→ agente; `/comando` → slash). `core/context.py`: DEEP.md jerárquico (global + proyecto)
+inyectado al system prompt + `/init` (el agente explora y escribe DEEP.md). Permisos con
+modos ask/auto/plan/yolo (`Permissions` en `cli/agent_runner.py`) + `/mode`. Slash commands:
+/help /init /mode /model /cost /clear /rules /skills /skill + passthrough legacy
+(/balance /history /doctor /show /serve /upgrade). `deep` (sin args) lanza el REPL v2;
+`DEEP_CLASSIC_REPL=1` usa el clásico. Verificado e2e: /init escribió DEEP.md detectando
+el stack; modo plan bloqueó escrituras.
 
 **Fase 4 — PWA al día**
 Nuevo `/api/agent` con streaming (SSE/WS) que maneja el loop; el frontend muestra la
@@ -201,4 +207,6 @@ cherry-pickea como utilidades; el planner queda como sub-flujo opcional, no como
 - [x] Fase 0 — `core/models.py`, `core/router.py`, `core/client.py` extendido. Verificado (smoke test + imports + compile).
 - [x] Fase 1 — `core/tools/` (fs/search/shell) + `core/agent_loop.py` + `cli/agent_runner.py` + comando `agent`. Verificado e2e real (crea/edita/corre código).
 - [x] Fase 2 — orquestación Pro/Flash: `core/builder.py` + tools `generate_code`/`apply_edit` → FLASH; loop en PRO. Verificado e2e (by_model = {pro, flash}, tests verdes).
-- [ ] Fase 3 — capa "Claude": `DEEP.md` + `/init`, skills agénticas + `/skill`, permisos + modos, slash commands, agente como handler por defecto del input natural.
+- [x] Fase 3 — capa "Claude": REPL agente-first (`cli/agent_repl.py`), `DEEP.md` + `/init` (`core/context.py`), permisos/modos (ask/auto/plan/yolo), slash commands, `/skill`. Verificado e2e.
+- [ ] Fase 4 — PWA: nuevo `/api/agent` con streaming que maneja el loop; endpoints viejos siguen vivos; frontend muestra actividad de tools.
+- [ ] Fase 5 — pulido: compactación de contexto, prompt caching para el input de PRO, subagentes, retiro del single-shot.
