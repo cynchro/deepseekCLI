@@ -44,22 +44,17 @@ def _printer(kind: str, data: dict):
         print(f"    {color}↳ {first[:100]}{_C['reset']}")
 
 
-def _ask(desc: str) -> bool:
-    try:
-        ans = input(f"  {_C['yellow']}¿Permitir {desc}? [s/N]{_C['reset']} ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
-    return ans in ("s", "si", "sí", "y", "yes")
-
-
 class Permissions:
     """Gate de permisos con modo mutable. Clasifica la acción por el texto del
-    pedido (las tools llaman ctx.confirm('ejecutar: ...') para shell)."""
+    pedido (las tools llaman ctx.confirm('ejecutar: ...') para shell).
 
-    def __init__(self, mode: str = "ask", prompt=_ask):
+    En el prompt interactivo se puede responder 'a' para no volver a preguntar en
+    toda la sesión: eso cambia el modo a 'auto' (escrituras automáticas, el shell
+    sigue preguntando) o a 'yolo' si la acción era un comando de shell."""
+
+    def __init__(self, mode: str = "ask", interactive: bool = True):
         self.mode = mode if mode in MODES else "ask"
-        self._prompt = prompt
+        self.interactive = interactive
 
     def __call__(self, desc: str) -> bool:
         is_shell = desc.startswith("ejecutar")
@@ -67,9 +62,28 @@ class Permissions:
             return False              # solo lectura
         if self.mode == "yolo":
             return True
-        if self.mode == "auto":
-            return self._prompt(desc) if is_shell else True
-        return self._prompt(desc)     # ask
+        if self.mode == "auto" and not is_shell:
+            return True               # escrituras automáticas; shell sí pregunta
+        if not self.interactive:
+            return False              # no se puede preguntar (no debería pasar en CLI)
+        return self._prompt(desc, is_shell)
+
+    def _prompt(self, desc: str, is_shell: bool) -> bool:
+        try:
+            ans = input(
+                f"  {_C['yellow']}¿Permitir {desc}?{_C['reset']} [s/N/{_C['bold']}a{_C['reset']}] "
+                f"{_C['dim']}(a = no preguntar más esta sesión){_C['reset']} "
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if ans in ("a", "always", "todo", "t"):
+            self.mode = "yolo" if is_shell else "auto"
+            que = "todo, incluido el shell" if is_shell else "las escrituras/ediciones"
+            print(f"  {_C['green']}✓ No vuelvo a preguntar por {que} esta sesión "
+                  f"(modo {self.mode}). Volvé a 'ask' con /mode ask.{_C['reset']}")
+            return True
+        return ans in ("s", "si", "sí", "y", "yes")
 
 
 def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
