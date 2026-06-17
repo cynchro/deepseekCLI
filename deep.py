@@ -92,6 +92,22 @@ def _legacy(argv: list):
 
     p_build.set_defaults(func=do_build)
 
+    # ── agent ────────────────────────────────────────────────────────────────
+    p_agent = sub.add_parser("agent", help="Agente con herramientas (loop estilo Claude Code)")
+    p_agent.add_argument("task", nargs="+", metavar="TAREA")
+    p_agent.add_argument("-w", "--workspace", default="", metavar="DIR")
+    p_agent.add_argument("-y", "--auto", action="store_true",
+                         help="No pedir permiso para escribir/ejecutar")
+
+    def do_agent(args):
+        from core.rules import load_rules
+        from cli.agent_runner import run_agent
+        ws = args.workspace or str(Path.cwd())
+        run_agent(" ".join(args.task), _require_api_key(), workspace=ws,
+                  rules=load_rules(Path(ws) / ".deeprules"), auto=args.auto)
+
+    p_agent.set_defaults(func=do_agent)
+
     # ── ask ──────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Hace una pregunta sin generar proyecto")
     p_ask.add_argument("question", nargs="+", metavar="PREGUNTA")

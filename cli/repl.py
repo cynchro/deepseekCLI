@@ -32,10 +32,12 @@ _BANNER = """\033[1m
 ╔══════════════════════════════════════════════════╗
 ║           deep — Ecosistema DeepSeek             ║
 ╚══════════════════════════════════════════════════╝\033[0m
-  Comandos: build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit
+  Comandos: agent  build  update  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit
 """
 
 _HELP = """
+  agent <tarea>          Agente con herramientas (loop estilo Claude Code; conversacional)
+  agent <tarea> --auto   Igual, sin pedir permiso para escribir/ejecutar
   build <tarea>          Genera un proyecto completo
   build -t <archivo>     Carga la tarea desde un archivo de texto
   build <tarea> -f       Genera y corrige automáticamente si falla
@@ -67,6 +69,7 @@ def _build_completer(skill_names: list):
     if not _HAS_PROMPT_TOOLKIT:
         return None
     base = {
+        "agent":   None,
         "build":   None, "update":  None, "ask":     None,
         "fix":     None, "show":    None, "serve":   None,
         "doctor":  None, "upgrade": None, "balance": None,
@@ -214,6 +217,20 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
             rules=load_rules(Path.cwd() / ".deeprules"),
             verbose=False, auto_fix=auto_fix,
         )
+
+    elif cmd == "agent":
+        if not args:
+            print("  Uso: agent <tarea>   (conversacional; 'reset' reinicia el agente)")
+        else:
+            from cli.agent_runner import make_agent, run_turn
+            auto = "--auto" in args or "-y" in args
+            clean = [a for a in args if a not in ("--auto", "-y")]
+            loop = state.get("agent")
+            if loop is None:
+                loop = make_agent(api_key, Path.cwd(),
+                                  rules=load_rules(Path.cwd() / ".deeprules"), auto=auto)
+                state["agent"] = loop
+            run_turn(loop, " ".join(clean))
 
     elif cmd == "skill":
         _handle_skill_meta(args, loaded_skills or {})
