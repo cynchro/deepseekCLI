@@ -31,10 +31,26 @@ from cli.commands import (run_balance, run_history, run_doctor, run_show,
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
+
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("deepseek-builder")
+    except Exception:
+        try:
+            import re
+            pyproject = Path(__file__).parent.parent / "pyproject.toml"
+            m = re.search(r'^version\s*=\s*"([^"]+)"',
+                          pyproject.read_text(encoding="utf-8"), re.MULTILINE)
+            return m.group(1) if m else "?"
+        except Exception:
+            return "?"
+
+
 _BANNER = f"""{_C['bold']}{_C['green']}
-  ╭───────────────────────────────────────────────╮
-  │   deep · agente DeepSeek (PRO decide · FLASH construye)
-  ╰───────────────────────────────────────────────╯{_C['reset']}
+  深度求索
+  deep · agente DeepSeek
+  v{_version()}{_C['reset']}
   Escribí lo que querés hacer en lenguaje natural.
   Comandos: {_C['dim']}/help /init /mode /model /skills /cost /clear /exit{_C['reset']}
 """
