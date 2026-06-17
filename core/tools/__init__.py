@@ -1,9 +1,9 @@
 """Registry de tools del agente: schemas para la API + dispatch de ejecución."""
-from core.tools import fs, search, shell, build
+from core.tools import fs, search, shell, build, tasks
 from core.tools.base import ToolContext  # noqa: F401 (re-export)
 
 _REGISTRY = {}
-for _mod in (fs, search, shell, build):
+for _mod in (fs, search, shell, build, tasks):
     _REGISTRY.update(_mod.TOOLS)
 
 

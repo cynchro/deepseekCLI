@@ -39,7 +39,7 @@ _BANNER = f"""{_C['bold']}{_C['green']}
   Comandos: {_C['dim']}/help /init /mode /model /skills /cost /clear /exit{_C['reset']}
 """
 
-_SLASH = ["/help", "/init", "/mode", "/model", "/skills", "/skill", "/rules",
+_SLASH = ["/help", "/init", "/tasks", "/mode", "/model", "/skills", "/skill", "/rules",
           "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
           "/serve", "/upgrade", "/exit", "/quit"]
 
@@ -48,6 +48,7 @@ _HELP = f"""
 
   {_C['bold']}Slash commands{_C['reset']}
     /init            Explora el proyecto y escribe/actualiza DEEP.md
+    /tasks           Muestra el plan de tareas persistente (.deep/tasks.json)
     /mode [m]        Permisos: {' '.join(MODES)}  (sin arg muestra el actual)
     /model [pro|flash]  Modelo orquestador del loop (default: pro)
     /skills          Lista los skills disponibles
@@ -85,6 +86,9 @@ class _Repl:
             print(_HELP)
         elif cmd == "/init":
             run_turn(self._get_agent(), INIT_TASK)
+        elif cmd == "/tasks":
+            from core.tasks import load_tasks, render
+            print("  " + render(load_tasks(self.cwd)).replace("\n", "\n  "))
         elif cmd == "/clear" or cmd == "/new":
             if self.agent:
                 self.agent.reset()

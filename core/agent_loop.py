@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable, List
 
 import core.debug as _dbg
+from core import tasks as _taskstore
 from core.builder import CodeBuilder
 from core.client import DeepSeekClient
 from core.models import MODEL_FLASH, MODEL_PRO
@@ -25,6 +26,12 @@ Tenés dos clases de herramientas para escribir:
   escribe los bytes. Es más rápido y barato; no escribas el código vos mismo.
 - write_file / edit_file → para contenido EXACTO y trivial que ya tenés resuelto
   (configs cortas, un renombre puntual, un .gitignore).
+
+Para trabajos con varios pasos o proyectos grandes:
+- Arrancá usando write_tasks para descomponer el trabajo en una lista de tareas concreta.
+- Marcá cada tarea con update_task: in_progress cuando la empezás, completed cuando la
+  terminás (o failed si no se pudo). Así no repetís trabajo y se puede retomar si te cortan.
+- Si el plan cambia en el camino, volvé a llamar write_tasks con la lista actualizada.
 
 Reglas de trabajo:
 - Para crear un archivo con lógica: generate_code con una spec clara.
@@ -67,6 +74,11 @@ class AgentLoop:
                 "\n".join(f"- {r}" for r in rules)
         if project_context:
             sys_prompt += "\n\n" + project_context
+        td = _taskstore.load_tasks(self.workspace)
+        if _taskstore.has_open(td):
+            sys_prompt += ("\n\nTAREAS EN CURSO (de una sesión anterior, .deep/tasks.json) — "
+                           "continuá desde acá, no rehagas lo completado:\n"
+                           + _taskstore.render(td))
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
 
     def reset(self):

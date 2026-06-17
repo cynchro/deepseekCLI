@@ -38,6 +38,10 @@ def _printer(kind: str, data: dict):
               f"{_C['dim']}{_fmt_args(data['name'], data['args'])}{_C['reset']}")
     elif kind == "build":
         print(f"    {_C['dim']}↳ {data['action']} con flash…{_C['reset']}")
+    elif kind == "tasks":
+        from core.tasks import render
+        body = render(data["data"]).replace("\n", "\n  ")
+        print(f"  {_C['cyan']}📋 plan{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}")
     elif kind == "compact":
         print(f"  {_C['dim']}🗜  contexto compactado (~{data.get('tokens_before',0)}→"
               f"{data.get('tokens_after',0)} tok){_C['reset']}")

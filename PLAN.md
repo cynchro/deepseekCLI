@@ -157,6 +157,15 @@ vivo + costo por modelo. Bug arreglado de raíz: el middleware `log_requests` re
 no consume el body. Verificado e2e (TestClient): /api/agent streaming + /api/ask + /api/run +
 /api/health, todos OK; shell remoto bloqueado.
 
+**Fase 6 — Escala / proyectos grandes** 🚧 (en curso, branch `feat/tasks`).
+- ✅ Plan + tareas persistentes (estilo TODO de Claude Code, + persistencia en disco):
+  `core/tasks.py` (store en `.deep/tasks.json`) + tools `write_tasks`/`update_task`
+  (`core/tools/tasks.py`). El loop inyecta el plan pendiente al arrancar (sobrevive al
+  tope de pasos, al 'continuá' y al reinicio); system prompt guía a descomponer y marcar
+  progreso; consola muestra el plan en vivo; slash `/tasks`. Verificado e2e.
+- ⏳ Subagentes: PRO delega cada tarea a un sub-agente con contexto fresco (el AgentLoop
+  es la unidad reutilizable); opcional paralelismo.
+
 **Fase 5 — Pulido** ✅ (núcleo HECHO). Compactación de contexto en el AgentLoop
 (`_compact_if_needed`: resume turnos viejos con FLASH en límites de mensaje 'user', sin
 romper grupos tool_calls/tool; umbral configurable). Costo preciso con prompt caching:
