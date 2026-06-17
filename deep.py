@@ -132,6 +132,40 @@ def _legacy(argv: list):
 
     p_upd.set_defaults(func=do_update)
 
+    # ── claudejob ──────────────────────────────────────────────────────────────
+    p_cj = sub.add_parser(
+        "claudejob",
+        help="Claude planifica (job.md) y DeepSeek construye/corrige")
+    p_cj.add_argument("-j", "--job", metavar="ARCHIVO",
+                      help="Ruta del job.md (por defecto .deep/job.md)")
+    p_cj.add_argument("-o", "--output", metavar="DIR",
+                      help="Directorio del proyecto (por defecto el actual)")
+    p_cj.add_argument("--model", default="deepseek-chat", metavar="MODELO")
+    p_cj.add_argument("--init", action="store_true",
+                      help="Crea la plantilla job.md para que la complete Claude")
+    p_cj.add_argument("--force", action="store_true",
+                      help="Con --init, regenera el job.md aunque exista (guarda copia .bak)")
+    p_cj.add_argument("--review", action="store_true",
+                      help="Vuelca estado + formato para que Claude revise")
+    p_cj.add_argument("--fix", metavar="REVIEW", dest="fix_file",
+                      help="Aplica las correcciones de Claude desde un review.md")
+    p_cj.add_argument("-f", "--auto-fix", action="store_true",
+                      help="Corrige automáticamente los módulos que fallen el build")
+
+    def do_claudejob(args):
+        from core.rules import load_rules
+        from cli.commands import run_claudejob
+        project_dir = Path(args.output) if args.output else Path.cwd()
+        run_claudejob(
+            api_key=_require_api_key(), project_dir=project_dir,
+            job_file=args.job, model=args.model,
+            rules=load_rules(Path.cwd() / ".deeprules", project_dir / ".deeprules"),
+            init=args.init, review=args.review, fix_file=args.fix_file,
+            auto_fix=getattr(args, "auto_fix", False), force=args.force,
+        )
+
+    p_cj.set_defaults(func=do_claudejob)
+
     # ── doctor ───────────────────────────────────────────────────────────────
     p_doc = sub.add_parser("doctor", help="Verifica que todo esté configurado correctamente")
 
@@ -177,11 +211,15 @@ def _legacy(argv: list):
     p_cfg = sub.add_parser("config", help="Muestra o modifica la configuración")
     p_cfg_sub = p_cfg.add_subparsers(dest="config_cmd", metavar="opción")
     p_cfg_sub.add_parser("set-key", help="Guarda una nueva API key")
+    p_cfg_sub.add_parser("set-lang", help="Cambia el idioma de las respuestas")
 
     def do_config(args):
-        from core.config import prompt_and_save, show_config
-        if getattr(args, "config_cmd", None) == "set-key":
+        from core.config import prompt_and_save, prompt_and_save_language, show_config
+        cfg_cmd = getattr(args, "config_cmd", None)
+        if cfg_cmd == "set-key":
             prompt_and_save()
+        elif cfg_cmd == "set-lang":
+            prompt_and_save_language()
         else:
             show_config()
 
