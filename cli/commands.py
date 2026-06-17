@@ -323,6 +323,45 @@ def run_update(change: str, api_key: str, project_dir: Path,
         print(f"\n❌ Error: {result.get('error', 'desconocido')}")
 
 
+def _built_context(project_dir: Path, max_files: int = 16, per_file: int = 1600) -> str:
+    """Bloque con el código ya escrito en disco, para que el builder del módulo
+    actual ENCAJE con lo construido antes (rutas, firmas, contratos reales) en
+    vez de adivinar contra el PLAN textual. Prioriza lo que define contratos que
+    otros módulos deben respetar (rutas/controllers, use cases, repos, schema).
+    Trunca por archivo y acota la cantidad para no inflar tokens."""
+    files = cj._files_on_disk(project_dir)
+    if not files:
+        return ""
+
+    def _rank(f: str) -> int:
+        low = f.lower()
+        if any(k in low for k in ("router", "route", "controller", "/http/", "middleware")):
+            return 0
+        if any(k in low for k in ("/application/", "usecase", "use_case", "interface", "repository")):
+            return 1
+        if low.endswith(".sql") or "schema" in low:
+            return 2
+        return 3
+
+    files = sorted(files, key=lambda f: (_rank(f), f))[:max_files]
+    blocks = []
+    for rel in files:
+        try:
+            text = (project_dir / rel).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if len(text) > per_file:
+            text = text[:per_file] + f"\n# … (+{len(text) - per_file} chars omitidos)"
+        blocks.append(f"### archivo: {rel}\n```\n{text}\n```")
+    if not blocks:
+        return ""
+    return (
+        "\n\nCÓDIGO YA CONSTRUIDO (módulos previos — respetá estas rutas, firmas y "
+        "contratos REALES; lo que construyas ahora DEBE encajar con esto, no con una "
+        f"interpretación libre del PLAN):\n{chr(10).join(blocks)}"
+    )
+
+
 def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = None,
                   model: str = "deepseek-chat", rules: List[str] = None,
                   init: bool = False, review: bool = False,
@@ -422,11 +461,16 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
     for idx, mod in enumerate(job["modules"], 1):
         print(f"\n── [{idx}/{total}] módulo: {mod['name']} ──")
         task = f"{mod['name']}: {mod['body']}".strip()
-        # Plan inyectado = arquitectura global de Claude + detalle del módulo.
+        # Plan inyectado = arquitectura global de Claude + detalle del módulo +
+        # código real ya construido por los módulos previos (para que encaje).
         # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
+        built = _built_context(project_dir)
+        if built:
+            print(f"   📎 contexto: {built.count('### archivo:')} archivo(s) previos")
         plan = (
             f"PLAN GENERAL (definido por el arquitecto):\n{job['plan']}\n\n"
             f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
+            f"{built}"
         )
         system = _make_system()
         try:
