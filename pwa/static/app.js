@@ -14,6 +14,7 @@ const inputEl        = document.getElementById('input');
 const sendBtn        = document.getElementById('send-btn');
 const newChatBtn     = document.getElementById('new-chat-btn');
 const balanceBtn     = document.getElementById('balance-btn');
+const agentBtn       = document.getElementById('agent-btn');
 const projectsBtn    = document.getElementById('projects-btn');
 const workspaceBtn   = document.getElementById('workspace-btn');
 const workspaceLabel = document.getElementById('workspace-label');
@@ -147,6 +148,8 @@ async function send() {
   try {
     if (parsed) {
       await runCommand(parsed.cmd, parsed.args, loading);
+    } else if (agentMode) {
+      await runAgent(text, loading);
     } else {
       await runAsk(text, loading);
     }
@@ -171,6 +174,83 @@ async function runAsk(text, loadingEl) {
   sessionId = data.session_id;
   localStorage.setItem('deep_session', sessionId);
   setLoading(loadingEl, data.response);
+}
+
+// ── Agente (loop con tools, streaming SSE) ─────────────────────────────────────
+
+let agentMode = localStorage.getItem('deep_agent') === '1';
+
+function updateAgentBtn() {
+  if (agentBtn) agentBtn.classList.toggle('active', agentMode);
+  inputEl.placeholder = agentMode
+    ? '🤖 Modo agente: pedí lo que querés hacer…'
+    : 'Preguntá algo, o escribí build / fix / show…';
+}
+
+if (agentBtn) {
+  agentBtn.addEventListener('click', () => {
+    agentMode = !agentMode;
+    localStorage.setItem('deep_agent', agentMode ? '1' : '0');
+    updateAgentBtn();
+    inputEl.focus();
+  });
+}
+updateAgentBtn();
+
+function fmtAgentArgs(ev) {
+  const a = ev.args || {};
+  return a.path || a.command || a.pattern || a.spec || '';
+}
+
+async function runAgent(text, loadingEl) {
+  const res = await fetch('/api/agent', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ message: text, session_id: sessionId, project_dir: workspace }),
+  });
+  if (res.status === 401) { logout(); return; }
+  if (!res.body) { setLoading(loadingEl, '❌ El navegador no soporta streaming.'); return; }
+
+  loadingEl.className = 'message assistant';
+  const steps = [];
+  const render = (finalText) => {
+    let md = '';
+    if (steps.length) md += steps.map(s => `\`${s}\``).join('  \n') + (finalText ? '\n\n' : '');
+    if (finalText) md += finalText;
+    loadingEl.innerHTML = marked.parse(md || '_pensando…_');
+    scrollDown();
+  };
+  render();
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const line = part.replace(/^data:\s?/, '').trim();
+      if (!line) continue;
+      let ev; try { ev = JSON.parse(line); } catch { continue; }
+      if (ev.type === 'start' && ev.session_id) {
+        sessionId = ev.session_id;
+        localStorage.setItem('deep_session', sessionId);
+      } else if (ev.type === 'tool_call') {
+        steps.push(`⚙ ${ev.name} ${fmtAgentArgs(ev)}`.trim());
+        render();
+      } else if (ev.type === 'build') {
+        steps.push(`↳ ${ev.action} con flash`);
+        render();
+      } else if (ev.type === 'done') {
+        render(ev.content || (ev.success ? '✅ Listo.' : '⚠️ Terminó con advertencias.'));
+      } else if (ev.type === 'fatal') {
+        render(`❌ ${ev.error}`);
+      }
+    }
+  }
 }
 
 // ── Comandos CLI ──────────────────────────────────────────────────────────────

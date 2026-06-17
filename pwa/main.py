@@ -1,15 +1,19 @@
 import contextlib
 import io
+import json
 import logging
 import os
+import queue
 import shutil
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,6 +21,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.client import DeepSeekClient
 from core.rules import load_rules
+from core.agent_loop import AgentLoop
+from core.context import load_project_context
 import core.balance as bal
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -58,18 +64,11 @@ def _cleanup_sessions():
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    # No consumimos el body: leerlo y reinyectar request._receive rompe tanto
+    # StreamingResponse (SSE) como, según la versión de Starlette, los handlers
+    # normales ("Unexpected message received: http.request"). Logueamos método+path.
     t0 = time.time()
-    body = b""
-    if request.method in ("POST", "DELETE", "PUT"):
-        body = await request.body()
-        # re-inject body so FastAPI can still read it
-        async def receive():
-            return {"type": "http.request", "body": body}
-        request._receive = receive
-
-    log.info("→ %s %s  body=%s", request.method, request.url.path,
-             body.decode(errors="replace")[:300] if body else "-")
-
+    log.info("→ %s %s", request.method, request.url.path)
     response = await call_next(request)
     elapsed = (time.time() - t0) * 1000
     log.info("← %s %s  status=%d  %.0fms",
@@ -101,6 +100,11 @@ def _get_or_create(session_id: str):
 class MessageRequest(BaseModel):
     message: str
     session_id: str = ""
+
+class AgentRequest(BaseModel):
+    message: str
+    session_id: str = ""
+    project_dir: str = ""
 
 class RunRequest(BaseModel):
     command: str
@@ -429,6 +433,97 @@ async def run_command(req: RunRequest, authorization: str | None = Header(None))
 
     log.warning("comando desconocido: %s", cmd)
     return {"output": f"❌ Comando desconocido: `{cmd}`"}
+
+
+# ── Agente (loop con tools, streaming) ──────────────────────────────────────────
+
+# Permiso remoto: aceptamos escrituras/ediciones; el shell queda BLOQUEADO salvo
+# que se habilite explícitamente con DEEP_REMOTE_SHELL=1 (es la máquina del usuario,
+# pero ejecutar shell desde el celular es sensible).
+REMOTE_SHELL = bool(os.environ.get("DEEP_REMOTE_SHELL", ""))
+
+
+def _remote_confirm(desc: str) -> bool:
+    if desc.startswith("ejecutar"):
+        return REMOTE_SHELL
+    return True
+
+
+agent_sessions: dict = {}   # sid -> (AgentLoop, workspace_str)
+
+
+def _get_or_create_agent(session_id: str, project_dir: str):
+    ws = _project_dir(project_dir)
+    ws.mkdir(parents=True, exist_ok=True)
+    sid = session_id or str(uuid.uuid4())
+    existing = agent_sessions.get(sid)
+    if existing and existing[1] == str(ws):
+        return sid, existing[0]
+    client = DeepSeekClient(DEEPSEEK_API_KEY)
+    loop = AgentLoop(
+        client, ws,
+        rules=load_rules(ws / ".deeprules"),
+        project_context=load_project_context(ws),
+        confirm=_remote_confirm,
+    )
+    agent_sessions[sid] = (loop, str(ws))
+    log.info("nuevo agente: session=%s  ws=%s", sid[:8], ws)
+    return sid, loop
+
+
+def _event_payload(kind: str, data: dict) -> dict:
+    """Compacta/trunca el evento para el stream (no mandamos archivos enteros)."""
+    d = dict(data or {})
+    if "result" in d:
+        first = (d["result"].splitlines() or [""])[0]
+        d["result"] = first[:200]
+    if "args" in d:
+        d["args"] = {k: str(v)[:120] for k, v in (d["args"] or {}).items()}
+    if "content" in d and kind == "user":
+        d["content"] = d["content"][:200]
+    return {"type": kind, **d}
+
+
+@app.post("/api/agent")
+async def agent_run(req: AgentRequest, authorization: str | None = Header(None)):
+    _check_auth(authorization)
+    sid, loop = _get_or_create_agent(req.session_id, req.project_dir)
+    log.info("agent: session=%s  msg=%s  ws=%s", sid[:8], req.message[:80], loop.workspace)
+
+    q: queue.Queue = queue.Queue()
+
+    def on_event(kind, data):
+        q.put(_event_payload(kind, data))
+
+    # rebind de eventos a esta request (el agente persiste entre llamadas)
+    loop.on_event = on_event
+    loop.ctx.on_event = on_event
+
+    def worker():
+        try:
+            res = loop.run(req.message)
+            q.put({"type": "done", "session_id": sid,
+                   "success": res.get("success", False),
+                   "content": res.get("content", ""),
+                   "stats": res.get("stats", {})})
+        except Exception as e:
+            log.error("agent ERROR: %s", e, exc_info=True)
+            q.put({"type": "fatal", "error": str(e)})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def stream():
+        yield f"data: {json.dumps({'type': 'start', 'session_id': sid})}\n\n"
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

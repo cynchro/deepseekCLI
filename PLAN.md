@@ -148,9 +148,14 @@ modos ask/auto/plan/yolo (`Permissions` en `cli/agent_runner.py`) + `/mode`. Sla
 `DEEP_CLASSIC_REPL=1` usa el clásico. Verificado e2e: /init escribió DEEP.md detectando
 el stack; modo plan bloqueó escrituras.
 
-**Fase 4 — PWA al día**
-Nuevo `/api/agent` con streaming (SSE/WS) que maneja el loop; el frontend muestra la
-actividad de tools. **Endpoints viejos siguen funcionando** durante toda la migración.
+**Fase 4 — PWA al día** ✅ HECHA. `pwa/main.py`: endpoint `/api/agent` con streaming SSE
+sobre el AgentLoop (sesiones de agente por sid+workspace), permiso remoto seguro
+(escrituras OK, shell BLOQUEADO salvo `DEEP_REMOTE_SHELL=1`). Frontend: toggle 🤖 Agente
+(`index.html`/`app.js`) que rutea texto natural al stream y muestra la actividad de tools en
+vivo + costo por modelo. Bug arreglado de raíz: el middleware `log_requests` reinyectaba
+`request._receive` y rompía SSE *y* (según versión de Starlette) los handlers normales; ahora
+no consume el body. Verificado e2e (TestClient): /api/agent streaming + /api/ask + /api/run +
+/api/health, todos OK; shell remoto bloqueado.
 
 **Fase 5 — Pulido**
 Compactación de contexto (ya existe `compact_history`), subagentes opcionales, y decidir
@@ -208,5 +213,5 @@ cherry-pickea como utilidades; el planner queda como sub-flujo opcional, no como
 - [x] Fase 1 — `core/tools/` (fs/search/shell) + `core/agent_loop.py` + `cli/agent_runner.py` + comando `agent`. Verificado e2e real (crea/edita/corre código).
 - [x] Fase 2 — orquestación Pro/Flash: `core/builder.py` + tools `generate_code`/`apply_edit` → FLASH; loop en PRO. Verificado e2e (by_model = {pro, flash}, tests verdes).
 - [x] Fase 3 — capa "Claude": REPL agente-first (`cli/agent_repl.py`), `DEEP.md` + `/init` (`core/context.py`), permisos/modos (ask/auto/plan/yolo), slash commands, `/skill`. Verificado e2e.
-- [ ] Fase 4 — PWA: nuevo `/api/agent` con streaming que maneja el loop; endpoints viejos siguen vivos; frontend muestra actividad de tools.
+- [x] Fase 4 — PWA: `/api/agent` SSE + toggle 🤖 Agente en el front + permiso remoto (shell gated). Fix middleware. Verificado e2e (TestClient): agent + legacy intactos.
 - [ ] Fase 5 — pulido: compactación de contexto, prompt caching para el input de PRO, subagentes, retiro del single-shot.
