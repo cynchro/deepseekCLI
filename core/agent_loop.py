@@ -43,7 +43,7 @@ class AgentLoop:
                  rules: List[str] = None, project_context: str = None,
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
-                 max_steps: int = 40, compact_threshold: int = 60000):
+                 max_steps: int = 100, compact_threshold: int = 150000):
         self.client = client
         self.model = model
         self.workspace = Path(workspace)
@@ -76,35 +76,46 @@ class AgentLoop:
     def _approx_tokens(self) -> int:
         return sum(len(m.get("content") or "") for m in self.messages) // 4
 
+    def _safe_cut(self, keep_tail: int = 12):
+        """Índice de corte seguro: el tail (messages[cut:]) arranca en un boundary
+        —un 'user' o un 'assistant' con tool_calls— para no partir un grupo
+        tool_calls/tool. Sirve tanto entre turnos como DENTRO de un run largo."""
+        n = len(self.messages)
+        for i in range(max(2, n - keep_tail), 1, -1):
+            m = self.messages[i]
+            if m["role"] == "user" or (m["role"] == "assistant" and m.get("tool_calls")):
+                return i
+        return None
+
     def _compact_if_needed(self):
-        """Si el historial crece demasiado, resume los turnos viejos con FLASH y
-        los reemplaza por una nota, preservando system + último turno. Corta en
-        límites de mensaje 'user' (nunca parte un grupo tool_calls/tool)."""
+        """Si el historial supera el umbral, resume el trabajo previo con FLASH y
+        lo reemplaza por una nota, preservando system + cola reciente. Corta en un
+        boundary seguro, así funciona también a mitad de un build largo."""
         if self._approx_tokens() < self.compact_threshold:
             return
-        user_idx = [i for i, m in enumerate(self.messages) if m["role"] == "user"]
-        if len(user_idx) < 2:
-            return  # no hay turnos viejos que resumir de forma segura
-        cut = user_idx[-1]
+        cut = self._safe_cut()
+        if not cut or cut <= 1:
+            return
         head = self.messages[1:cut]
         convo = "\n".join(
             f"{m['role'].upper()}: {(m.get('content') or '')[:1500]}"
-            for m in head if m["role"] in ("user", "assistant") and m.get("content")
+            for m in head if m.get("content")
         )
         if not convo:
             return
         res = self.client.complete(
             [{"role": "system", "content":
-              "Resumí esta sesión de trabajo preservando decisiones, archivos "
-              "creados/modificados con sus rutas, y lo que quede pendiente. Conciso."},
+              "Resumí el trabajo hecho hasta acá preservando: la tarea/objetivo, los "
+              "archivos creados/modificados con sus rutas, las decisiones de arquitectura, "
+              "lo que se probó y su resultado, y lo que queda pendiente. Conciso pero completo."},
              {"role": "user", "content": convo}],
-            model=MODEL_FLASH, temperature=0.2, max_tokens=1000,
+            model=MODEL_FLASH, temperature=0.2, max_tokens=1200,
         )
         if not res.get("success"):
             return
         before = self._approx_tokens()
         summary = {"role": "assistant",
-                   "content": "[Resumen de la sesión anterior]\n" + res["content"]}
+                   "content": "[Resumen del trabajo previo en esta tarea]\n" + res["content"]}
         self.messages = [self.messages[0], summary] + self.messages[cut:]
         self.on_event("compact", {"tokens_before": before, "tokens_after": self._approx_tokens()})
         _dbg.log("AGENT", f"compactado  {before} -> {self._approx_tokens()} tokens aprox")
@@ -114,9 +125,9 @@ class AgentLoop:
         self.messages.append({"role": "user", "content": user_input})
         self.on_event("user", {"content": user_input})
         _dbg.log("AGENT", f"run  task={user_input[:120]}  model={self.model}")
-        self._compact_if_needed()
 
         for step in range(self.max_steps):
+            self._compact_if_needed()   # también a mitad de un build largo
             resp = self.client.complete(
                 self.messages, model=self.model,
                 tools=schemas(), temperature=0.3, max_tokens=8000,
@@ -158,7 +169,8 @@ class AgentLoop:
             return {"success": True, "content": content,
                     "steps": step + 1, "stats": self.client.get_stats()}
 
-        self.on_event("error", {"error": "max_steps"})
-        return {"success": False,
-                "error": f"Se alcanzó el máximo de {self.max_steps} pasos",
+        msg = (f"Se alcanzó el máximo de {self.max_steps} pasos. La tarea quedó a "
+               f"medias — escribí 'continuá' para que siga desde donde estaba.")
+        self.on_event("error", {"error": "max_steps", "message": msg})
+        return {"success": False, "error": msg, "max_steps_reached": True,
                 "steps": self.max_steps, "stats": self.client.get_stats()}
