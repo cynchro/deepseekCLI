@@ -112,7 +112,7 @@ TOOLS = {
         "impl": write_file,
         "schema": {
             "name": "write_file",
-            "description": "Crea o sobreescribe un archivo con el contenido completo. Usalo para archivos nuevos; para cambios chicos preferí edit_file.",
+            "description": "Crea o sobreescribe un archivo con el contenido completo que VOS escribís. Es tu herramienta principal para crear archivos nuevos. Para modificar uno existente preferí edit_file (quirúrgico).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,7 +127,7 @@ TOOLS = {
         "impl": edit_file,
         "schema": {
             "name": "edit_file",
-            "description": "Reemplaza una porción exacta de texto en un archivo existente. old_string debe ser único salvo que uses replace_all. Preferí esto antes que reescribir el archivo entero.",
+            "description": "Tu herramienta PRINCIPAL para modificar código: reemplaza una porción exacta de texto en un archivo existente, tocando solo lo que cambia. Leé el archivo antes; old_string debe coincidir carácter por carácter y ser único (salvo replace_all). Nunca reescribas el archivo entero para un cambio puntual.",
             "parameters": {
                 "type": "object",
                 "properties": {

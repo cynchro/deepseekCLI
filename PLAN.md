@@ -74,10 +74,17 @@ Patrón **jerárquico** (no un router que adivina por turno):
 | Construcción (generar contenido, aplicar edits, transformaciones mecánicas) | **FLASH** | Las manos. Produce el texto verboso barato y rápido. |
 | `read_file` / `grep` / `list_dir` / `run_command` | — | Determinista, sin LLM. |
 
-**El truco de tokens:** PRO no escribe código. Cuando hay que escribir, llama a una
-herramienta `generate_code(spec)` / `apply_edit(instrucciones)` que internamente usa
-FLASH. PRO decide *qué* y *dónde* (contexto chico = caro pero poco); FLASH produce
-*los bytes* (contexto grande = barato). Inteligencia + velocidad + no comerse los tokens.
+**⚠️ REVISADO (2026-06-18) — el "truco de tokens" se revierte.** El patrón original
+("PRO no escribe código; describe specs y FLASH produce los bytes") costaba calidad: el
+techo de calidad pasaba a ser FLASH, había una traducción con pérdida intención→spec→código,
+y `apply_edit` reescribía archivos enteros (drift, código colateral alterado). **Principio
+nuevo:** el modelo fuerte (PRO) escribe el código directo con `write_file`/`edit_file`
+quirúrgico, igual que Claude Code. `generate_code`/`apply_edit` (FLASH) quedan como
+EXCEPCIÓN para volumen mecánico de bajo riesgo (boilerplate, scaffolding, fixtures), nunca
+para lógica/algoritmos/APIs. El split Pro/Flash se reserva para tareas no críticas de
+escritura (resúmenes, compactación, búsqueda). Branch: `feat/quality-direct-write`.
+
+FLASH sigue siendo "las manos" solo en ese rol acotado.
 
 Telemetría: contabilizar gasto por modelo por separado.
 

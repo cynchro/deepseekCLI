@@ -60,11 +60,11 @@ TOOLS = {
         "impl": generate_code,
         "schema": {
             "name": "generate_code",
-            "description": ("Crea un archivo con código real a partir de una especificación. "
-                            "Lo produce un modelo de construcción rápido (FLASH), así que NO "
-                            "tenés que escribir el código vos: describí qué debe hacer. Preferí "
-                            "esto antes que write_file para código sustancial. Pasá context_files "
-                            "con los archivos relevantes si necesita contexto."),
+            "description": ("EXCEPCIÓN, no la regla: crea un archivo delegando la escritura a un "
+                            "modelo rápido y más barato (FLASH). Usalo SOLO para volumen mecánico de "
+                            "bajo riesgo (boilerplate, scaffolding, fixtures, traducir formatos). Para "
+                            "lógica, algoritmos o APIs públicas escribí vos con write_file. Pasá "
+                            "context_files con los archivos relevantes si necesita contexto."),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -81,9 +81,10 @@ TOOLS = {
         "impl": apply_edit,
         "schema": {
             "name": "apply_edit",
-            "description": ("Modifica un archivo existente según instrucciones en lenguaje natural. "
-                            "Un modelo rápido (FLASH) produce la versión actualizada. Preferí esto "
-                            "antes que edit_file cuando el cambio no es un reemplazo trivial exacto. "
+            "description": ("EXCEPCIÓN, no la regla: modifica un archivo delegando a un modelo rápido "
+                            "(FLASH), que REESCRIBE el archivo completo. Riesgoso para código fino "
+                            "(puede alterar lo que no debía). Usalo SOLO para cambios masivos y mecánicos "
+                            "de bajo riesgo. Para modificar código que importa, usá edit_file (quirúrgico). "
                             "No tenés que leer el archivo primero: FLASH ya recibe su contenido."),
             "parameters": {
                 "type": "object",
