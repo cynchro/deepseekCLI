@@ -1,7 +1,17 @@
 """Tools de filesystem: read_file, write_file, edit_file, list_dir, glob."""
-from core.tools.base import ToolContext, safe_path, rel, truncate
+from core.tools.base import ToolContext, safe_path, rel, truncate, make_diff
 
 _READ_MAX_LINES = 2000
+
+
+def _emit_diff(ctx: ToolContext, path: str, old: str, new: str) -> str:
+    """Emite el diff por evento (para la consola) y lo devuelve recortado para que
+    el modelo lo vea y pueda auto-revisar lo que cambió. '' si no hubo cambios."""
+    diff = make_diff(old, new, path)
+    if diff:
+        ctx.on_event("file_diff", {"path": path, "diff": diff})
+        return "\n--- cambios ---\n" + diff
+    return ""
 
 
 def read_file(ctx: ToolContext, path: str, offset: int = 0, limit: int = None) -> str:
@@ -22,6 +32,7 @@ def read_file(ctx: ToolContext, path: str, offset: int = 0, limit: int = None) -
     sliced = lines[start:start + lim]
     if not sliced:
         return f"ERROR: offset {start} fuera de rango ({len(lines)} líneas)"
+    ctx.known_files.add(rel(ctx, p))
     numbered = "\n".join(f"{start + i + 1:>6}\t{ln}" for i, ln in enumerate(sliced))
     if start + lim < len(lines):
         numbered += f"\n[... {len(lines) - (start + lim)} líneas más; usá offset={start + lim} ...]"
@@ -31,6 +42,7 @@ def read_file(ctx: ToolContext, path: str, offset: int = 0, limit: int = None) -
 def write_file(ctx: ToolContext, path: str, content: str) -> str:
     p = safe_path(ctx, path)
     existed = p.exists()
+    old = p.read_text(encoding="utf-8", errors="replace") if existed else ""
     if not ctx.confirm(f"escribir {rel(ctx, p)} ({len(content)} chars)"):
         return "CANCELADO por el usuario"
     try:
@@ -38,8 +50,10 @@ def write_file(ctx: ToolContext, path: str, content: str) -> str:
         p.write_text(content, encoding="utf-8")
     except Exception as e:
         return f"ERROR escribiendo {path}: {e}"
+    ctx.known_files.add(rel(ctx, p))
     ctx.on_event("file_write", {"path": rel(ctx, p), "bytes": len(content)})
-    return f"OK: {rel(ctx, p)} {'actualizado' if existed else 'creado'} ({len(content)} chars)"
+    diff = _emit_diff(ctx, rel(ctx, p), old, content) if existed else ""
+    return f"OK: {rel(ctx, p)} {'actualizado' if existed else 'creado'} ({len(content)} chars)" + diff
 
 
 def edit_file(ctx: ToolContext, path: str, old_string: str,
@@ -47,6 +61,9 @@ def edit_file(ctx: ToolContext, path: str, old_string: str,
     p = safe_path(ctx, path)
     if not p.exists():
         return f"ERROR: no existe {path}"
+    if rel(ctx, p) not in ctx.known_files:
+        return (f"ERROR: todavía no viste {path} en esta sesión. Leelo con read_file "
+                f"antes de editarlo, así no inventás su contenido.")
     try:
         content = p.read_text(encoding="utf-8")
     except Exception as e:
@@ -66,7 +83,8 @@ def edit_file(ctx: ToolContext, path: str, old_string: str,
     except Exception as e:
         return f"ERROR escribiendo {path}: {e}"
     ctx.on_event("file_edit", {"path": rel(ctx, p), "replacements": n})
-    return f"OK: {rel(ctx, p)} editado ({n} reemplazo{'s' if n > 1 else ''})"
+    diff = _emit_diff(ctx, rel(ctx, p), content, new_content)
+    return f"OK: {rel(ctx, p)} editado ({n} reemplazo{'s' if n > 1 else ''})" + diff
 
 
 def list_dir(ctx: ToolContext, path: str = ".") -> str:

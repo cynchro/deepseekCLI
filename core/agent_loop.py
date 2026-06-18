@@ -84,6 +84,9 @@ que importa.
   Pasale una tarea clara y completa (no ve tu charla). Las tareas chicas hacelas vos directo.
 
 # Cierre
+- Antes de declarar terminado, repasá tu propio diff (lo ves en el resultado de cada
+  edición): ¿quedó algún print de debug, TODO, import sin usar, o un caso sin cubrir?
+  Si sí, arreglalo antes de cerrar.
 - Cuando terminaste Y verificaste, respondé en texto (sin más tool calls) con un resumen
   breve de lo que hiciste y cómo lo probaste.
 - Sé conciso y directo. No pidas permiso: actuá."""
@@ -96,9 +99,12 @@ class AgentLoop:
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
                  max_steps: int = 100, compact_threshold: int = 150000,
-                 depth: int = 0, max_depth: int = 2, is_subagent: bool = False):
+                 depth: int = 0, max_depth: int = 2, is_subagent: bool = False,
+                 auto_verify: bool = True):
         self.client = client
         self.model = model
+        self.auto_verify = auto_verify
+        self._verify_attempts = 0
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.on_event = on_event or (lambda kind, data: None)
@@ -111,7 +117,8 @@ class AgentLoop:
         self._project_context = project_context
         # FLASH construye; comparte el mismo client que PRO para que get_stats()
         # agregue el gasto de ambos modelos.
-        self.builder = CodeBuilder(self.client, model=MODEL_FLASH, rules=rules)
+        self.builder = CodeBuilder(self.client, model=MODEL_FLASH, rules=rules,
+                                   project_context=project_context)
         self.ctx = ToolContext(
             workspace=self.workspace,
             on_event=self.on_event,
@@ -194,6 +201,7 @@ class AgentLoop:
             on_event=self.on_event, confirm=lambda desc: False,  # read-only: nada que confirmar
             max_steps=20, compact_threshold=self.compact_threshold,
             depth=self.depth + 1, max_depth=self.max_depth, is_subagent=True,
+            auto_verify=False,
         )
         # Solo herramientas de lectura: no escribe, no edita, no ejecuta, no delega.
         child.tools_exclude = set(tool_names()) - _EXPLORE_READONLY
@@ -203,6 +211,54 @@ class AgentLoop:
         res = child.run(seed)
         self.on_event("explore_done", {"success": res.get("success"), "depth": self.depth + 1})
         return (res.get("content") or "").strip() or "(el investigador no devolvió nada)"
+
+    def _detect_verify_cmd(self):
+        """Comando de verificación del proyecto, si se puede inferir. Conservador:
+        solo devuelve algo cuando hay una señal clara (tests pytest, script npm test)."""
+        ws = self.workspace
+        if (any(ws.glob("test_*.py")) or any(ws.glob("*_test.py"))
+                or (ws / "tests").is_dir() or (ws / "pytest.ini").exists()
+                or (ws / "conftest.py").exists()):
+            return "python3 -m pytest -q"
+        pkg = ws / "package.json"
+        if pkg.exists():
+            try:
+                scripts = json.loads(pkg.read_text(encoding="utf-8")).get("scripts", {})
+                if "test" in scripts:
+                    return "npm test --silent"
+            except Exception:
+                pass
+        return None
+
+    def _auto_verify(self):
+        """Tras un turno que tocó código, corre los tests del proyecto (si los detecta)
+        y devuelve el fallo para reinyectarlo al loop; None si pasa o no aplica. Hace el
+        loop de verificación menos dependiente de que el modelo se acuerde de correrlos."""
+        if not self.auto_verify or not self._touched or self._verify_attempts >= 2:
+            return None
+        cmd = self._detect_verify_cmd()
+        if not cmd:
+            return None
+        # Pasa por el mismo gate que la shell tool: en modo plan o en remoto (shell
+        # bloqueado) esto se deniega y no corremos nada.
+        if not self.ctx.confirm(f"ejecutar: {cmd}  (verificación automática)"):
+            return None
+        self._verify_attempts += 1
+        self.on_event("verify", {"command": cmd})
+        import subprocess
+        try:
+            r = subprocess.run(cmd, shell=True, cwd=str(self.workspace),
+                               capture_output=True, text=True, timeout=180)
+        except Exception:
+            return None  # no bloquear el cierre por un problema del runner de tests
+        self.on_event("verify_result", {"command": cmd, "exit": r.returncode})
+        if r.returncode == 0:
+            return None
+        out = (r.stdout or "")[-2500:]
+        if r.stderr:
+            out += "\n[stderr]\n" + r.stderr[-1000:]
+        return (f"VERIFICACIÓN AUTOMÁTICA: `{cmd}` falló (exit={r.returncode}). "
+                f"No declares terminado: arreglá el código hasta dejarlo en verde.\n{out}")
 
     def reset(self):
         """Reinicia la conversación preservando el system prompt."""
@@ -260,6 +316,9 @@ class AgentLoop:
         self.messages.append({"role": "user", "content": user_input})
         self.on_event("user", {"content": user_input})
         _dbg.log("AGENT", f"run  task={user_input[:120]}  model={self.model}")
+        self._touched = set()
+        self._verify_attempts = 0
+        _WRITE_TOOLS = {"write_file", "edit_file", "generate_code", "apply_edit"}
 
         for step in range(self.max_steps):
             self._compact_if_needed()   # también a mitad de un build largo
@@ -290,6 +349,8 @@ class AgentLoop:
                     self.on_event("tool_call", {"name": name, "args": args})
                     _dbg.log("AGENT", f"tool={name}  args={raw_args[:200]}")
                     result = dispatch(name, args, self.ctx)
+                    if name in _WRITE_TOOLS and result.startswith("OK") and args.get("path"):
+                        self._touched.add(args["path"])
                     self.on_event("tool_result", {"name": name, "result": result})
                     self.messages.append({
                         "role": "tool",
@@ -298,8 +359,13 @@ class AgentLoop:
                     })
                 continue
 
-            # respuesta final (sin tool calls)
+            # respuesta final (sin tool calls): antes de cerrar, verificación automática
             content = resp.get("content", "")
+            verify_fail = self._auto_verify()
+            if verify_fail:
+                self.on_event("verify_reinject", {"attempt": self._verify_attempts})
+                self.messages.append({"role": "user", "content": verify_fail})
+                continue
             self.on_event("assistant", {"content": content})
             _dbg.log("AGENT", f"done  steps={step + 1}")
             return {"success": True, "content": content,

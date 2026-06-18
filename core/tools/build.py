@@ -4,7 +4,7 @@ PRO llama estas tools con una especificación/instrucción compacta; el CodeBuil
 (FLASH) produce el contenido completo. Se devuelve un resumen a PRO, no el código,
 para mantener su contexto liviano.
 """
-from core.tools.base import ToolContext, safe_path, rel
+from core.tools.base import ToolContext, safe_path, rel, make_diff
 
 
 def generate_code(ctx: ToolContext, path: str, spec: str, context_files: list = None) -> str:
@@ -23,6 +23,7 @@ def generate_code(ctx: ToolContext, path: str, spec: str, context_files: list = 
         p.write_text(content, encoding="utf-8")
     except Exception as e:
         return f"ERROR escribiendo {path}: {e}"
+    ctx.known_files.add(rel(ctx, p))
     ctx.on_event("file_write", {"path": rel(ctx, p), "bytes": len(content)})
     return f"OK: {rel(ctx, p)} generado por flash ({len(content)} chars, {content.count(chr(10)) + 1} líneas)"
 
@@ -50,9 +51,14 @@ def apply_edit(ctx: ToolContext, path: str, instructions: str, context_files: li
         p.write_text(new, encoding="utf-8")
     except Exception as e:
         return f"ERROR escribiendo {path}: {e}"
-    ctx.on_event("file_edit", {"path": rel(ctx, p), "replacements": 1})
-    old_n, new_n = current.count("\n") + 1, new.count("\n") + 1
-    return f"OK: {rel(ctx, p)} editado por flash ({old_n}→{new_n} líneas)"
+    ctx.known_files.add(rel(ctx, p))
+    ctx.on_event("file_edit", {"path": rel(ctx, p), "replacements": res.get("applied", 1)})
+    diff = make_diff(current, new, rel(ctx, p))
+    if diff:
+        ctx.on_event("file_diff", {"path": rel(ctx, p), "diff": diff})
+    applied = res.get("applied", 1)
+    tail = ("\n--- cambios ---\n" + diff) if diff else ""
+    return f"OK: {rel(ctx, p)} editado por flash ({applied} bloque{'s' if applied != 1 else ''})" + tail
 
 
 TOOLS = {

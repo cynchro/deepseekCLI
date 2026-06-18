@@ -7,6 +7,7 @@ rápido— para producir los bytes, manteniendo liviano el contexto de PRO.
 Usa el MISMO DeepSeekClient que el loop (pasando model=FLASH por llamada), así
 get_stats() agrega el gasto de ambos modelos.
 """
+import re
 from pathlib import Path
 from typing import List
 
@@ -14,10 +15,19 @@ from core.client import DeepSeekClient
 from core.models import MODEL_FLASH
 
 _GEN_SYS = ("Sos un generador de código senior. Producís archivos completos, "
-            "production-ready, sin placeholders ni TODOs. Devolvés SOLO el "
-            "contenido del archivo, sin explicaciones ni fences markdown.")
-_EDIT_SYS = ("Sos un desarrollador senior. Aplicás cambios precisos y devolvés el "
-             "archivo COMPLETO ya modificado, sin placeholders ni explicaciones.")
+            "production-ready, sin placeholders ni TODOs. Seguís las convenciones del "
+            "proyecto. Devolvés SOLO el contenido del archivo, sin explicaciones ni fences.")
+_EDIT_SYS = (
+    "Sos un desarrollador senior que aplica cambios QUIRÚRGICOS. No reescribís el archivo "
+    "entero: devolvés solo los bloques de búsqueda/reemplazo necesarios, en este formato EXACTO "
+    "y nada más:\n"
+    "<<<<<<< SEARCH\n"
+    "<texto EXACTO actual, copiado tal cual del archivo, con contexto suficiente para ser único>\n"
+    "=======\n"
+    "<texto nuevo>\n"
+    ">>>>>>> REPLACE\n"
+    "Repetí el bloque por cada cambio. El SEARCH debe coincidir carácter por carácter con el "
+    "archivo actual. No incluyas explicaciones ni fences markdown.")
 
 
 def strip_code(text: str) -> str:
@@ -33,18 +43,49 @@ def strip_code(text: str) -> str:
     return t + "\n" if t else t
 
 
+_SR_RE = re.compile(
+    r"<{5,}\s*SEARCH\s*\n(.*?)\n={5,}\s*\n(.*?)\n>{5,}\s*REPLACE",
+    re.DOTALL,
+)
+
+
+def parse_search_replace(text: str):
+    """Extrae bloques (search, replace) del formato del editor quirúrgico."""
+    return [(m.group(1), m.group(2)) for m in _SR_RE.finditer(text or "")]
+
+
+def apply_search_replace(current: str, blocks) -> tuple:
+    """Aplica los bloques en orden sobre `current`. Devuelve (nuevo, aplicados, error)."""
+    new = current
+    applied = 0
+    for search, replace in blocks:
+        n = new.count(search)
+        if n == 0:
+            return new, applied, f"bloque SEARCH no encontrado: {search[:80]!r}"
+        if n > 1:
+            return new, applied, f"bloque SEARCH ambiguo ({n} coincidencias): {search[:80]!r}"
+        new = new.replace(search, replace, 1)
+        applied += 1
+    return new, applied, None
+
+
 class CodeBuilder:
     def __init__(self, client: DeepSeekClient, model: str = MODEL_FLASH,
-                 rules: List[str] = None, max_context_chars: int = 6000):
+                 rules: List[str] = None, project_context: str = None,
+                 max_context_chars: int = 6000):
         self.client = client
         self.model = model
         self.rules = rules or []
+        self.project_context = project_context or ""
         self.max_context_chars = max_context_chars
 
     def _rules_block(self) -> str:
-        if not self.rules:
-            return ""
-        return "\nReglas del proyecto:\n" + "\n".join(f"- {r}" for r in self.rules) + "\n"
+        block = ""
+        if self.project_context:
+            block += "\n" + self.project_context[:2000] + "\n"
+        if self.rules:
+            block += "\nReglas del proyecto:\n" + "\n".join(f"- {r}" for r in self.rules) + "\n"
+        return block
 
     def _context_block(self, workspace, context_files) -> str:
         if not context_files:
@@ -77,13 +118,16 @@ class CodeBuilder:
         return {"success": True, "content": strip_code(resp["content"])}
 
     def edit(self, path, instructions, current, workspace, context_files=None) -> dict:
+        numbered = "\n".join(f"{i + 1:>5}\t{ln}" for i, ln in enumerate(current.splitlines()))
         prompt = (
-            f"Modificá el archivo `{path}` según las instrucciones.\n\n"
+            f"Modificá el archivo `{path}` según las instrucciones, con bloques "
+            f"SEARCH/REPLACE quirúrgicos (no reescribas todo el archivo).\n\n"
             f"Instrucciones:\n{instructions}\n"
             f"{self._context_block(workspace, context_files)}"
             f"{self._rules_block()}"
-            f"\nContenido actual de `{path}`:\n```\n{current}\n```\n"
-            "\nDevolvé el contenido COMPLETO del archivo ya modificado."
+            f"\nContenido actual de `{path}` (con nº de línea solo de referencia; "
+            f"NO los incluyas en el SEARCH):\n```\n{numbered}\n```\n"
+            "\nDevolvé SOLO los bloques SEARCH/REPLACE necesarios."
         )
         resp = self.client.complete(
             [{"role": "system", "content": _EDIT_SYS},
@@ -92,4 +136,11 @@ class CodeBuilder:
         )
         if not resp.get("success"):
             return {"success": False, "error": resp.get("content", "")}
-        return {"success": True, "content": strip_code(resp["content"])}
+        blocks = parse_search_replace(resp["content"])
+        if not blocks:
+            return {"success": False,
+                    "error": "FLASH no devolvió bloques SEARCH/REPLACE válidos"}
+        new, applied, err = apply_search_replace(current, blocks)
+        if err:
+            return {"success": False, "error": err}
+        return {"success": True, "content": new, "applied": applied}

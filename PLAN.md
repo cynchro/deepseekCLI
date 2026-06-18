@@ -186,6 +186,25 @@ captura `prompt_cache_hit_tokens`, `/cost` los muestra. Verificado: caching real
 (4096/6582 tok cacheados en un run). Pendiente opcional: subagentes; el single-shot
 `system.py` queda como fast-path del `build` legacy/PWA (no se retira).
 
+**Fase 7 — Calidad estilo Claude Code** ✅ (branch `feat/quality-direct-write`). Objetivo:
+acercar la calidad a Claude Code SIN perder calidad por ahorrar tokens (DeepSeek ya es barato).
+- ✅ El modelo fuerte (PRO) escribe el código directo con write_file/edit_file; se revierte el
+  "truco de tokens". generate_code/apply_edit (FLASH) = excepción para volumen mecánico.
+- ✅ `explore`: investigación read-only delegada a FLASH (lee/grepea y devuelve un digest),
+  para descargar el contexto caro de PRO sin tocar calidad.
+- ✅ P1 — diffs visibles: edit/write/apply_edit emiten el diff real (consola) y lo devuelven a
+  PRO para auto-revisión (`make_diff`, evento `file_diff`).
+- ✅ P2 — `apply_edit` quirúrgico: FLASH devuelve bloques SEARCH/REPLACE que se aplican
+  determinísticamente (`parse_search_replace`/`apply_search_replace`), ya no reescribe el archivo.
+- ✅ P3 — verificación automática: tras un turno que tocó código, corre los tests del proyecto
+  (pytest/npm test detectados) y reinyecta el fallo al loop (máx 2). Pasa por el gate de permisos
+  → en modo plan / remoto (shell bloqueado) no corre.
+- ✅ P4 — guard read-before-edit: editar un archivo no leído en la sesión se bloquea (anti-alucinación).
+- ✅ P5 — FLASH hereda `project_context` (DEEP.md) + reglas en generate_code/apply_edit.
+- ✅ P6 — self-review al cerrar (prompt): repasar el propio diff antes de declarar terminado.
+Verificado e2e contra la API: PRO escribe directo (by_model solo pro), edición quirúrgica con diff,
+auto-verify corrió y dejó verde, guard bloquea edición a ciegas, auto-verify respeta plan/remoto.
+
 ---
 
 ## 7. Reglas de oro (para que sea v2 ESTABLE, no beta)

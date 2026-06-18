@@ -42,6 +42,22 @@ def _printer(kind: str, data: dict):
         from core.tasks import render
         body = render(data["data"]).replace("\n", "\n  ")
         print(f"  {_C['cyan']}📋 plan{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}")
+    elif kind == "file_diff":
+        for ln in data.get("diff", "").splitlines():
+            if ln.startswith("+") and not ln.startswith("+++"):
+                print(f"    {_C['green']}{ln}{_C['reset']}")
+            elif ln.startswith("-") and not ln.startswith("---"):
+                print(f"    {_C['red']}{ln}{_C['reset']}")
+            else:
+                print(f"    {_C['dim']}{ln}{_C['reset']}")
+    elif kind == "verify":
+        print(f"  {_C['cyan']}✓ verificando: {_C['reset']}{_C['dim']}{data.get('command','')}{_C['reset']}")
+    elif kind == "verify_result":
+        ok = data.get("exit") == 0
+        col = _C["green"] if ok else _C["red"]
+        print(f"    {col}↳ verificación {'OK' if ok else 'FALLÓ'} (exit={data.get('exit')}){_C['reset']}")
+    elif kind == "verify_reinject":
+        print(f"  {_C['yellow']}↻ tests en rojo — el agente sigue para arreglarlo{_C['reset']}")
     elif kind == "explore_start":
         print(f"  {_C['cyan']}🔍 explorando (flash):{_C['reset']} "
               f"{_C['dim']}{data.get('question','')[:80]}{_C['reset']}")
