@@ -18,7 +18,7 @@ from core.tools import schemas, dispatch, tool_names
 from core.tools.base import ToolContext
 
 # Investigador read-only (FLASH): solo lee, nunca escribe ni ejecuta.
-_EXPLORE_READONLY = {"read_file", "grep", "list_dir", "glob"}
+_EXPLORE_READONLY = {"read_file", "grep", "list_dir", "glob", "search_code"}
 
 EXPLORE_SYSTEM = """Sos un investigador de código de solo lectura. Otro agente te hace
 una pregunta sobre este proyecto y vos la respondés explorando el workspace.
@@ -69,6 +69,9 @@ que importa.
 
 # Exploración y flujo
 - Explorá con list_dir, glob, grep y read_file antes de asumir la estructura del proyecto.
+- En un codebase grande, para ubicar "dónde se hace X" usá search_code (recuperación por
+  relevancia, mejor que grep): te devuelve los fragmentos más pertinentes con archivo:línea.
+  Después abrí los archivos puntuales con read_file.
 - Para entender un área grande o desconocida sin llenar tu contexto, usá explore: le hacés
   una pregunta a un agente lector (FLASH) que lee/grepea por vos y te devuelve un resumen
   compacto. Ideal antes de editar código ajeno; vos seguís decidiendo y escribiendo.

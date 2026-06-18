@@ -130,6 +130,7 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | Tool | Qué hace |
 |------|----------|
 | `read_file` / `list_dir` / `glob` / `grep` | Exploración y lectura (determinista, sin LLM). |
+| `search_code` | Recuperación por **relevancia** (índice BM25 local, incremental): ubica "dónde se hace X" en codebases grandes y devuelve los fragmentos más pertinentes con `archivo:línea`. Mejor que grep para orientarse. |
 | `write_file` / `edit_file` | Crear / editar archivos. **El modelo fuerte escribe acá.** `edit_file` es un reemplazo de string quirúrgico (no reescribe el archivo entero). |
 | `run_command` | Corre comandos de shell en el workspace (tests, git, instalar deps), con permiso. |
 | `explore` | Investigación **read-only delegada a FLASH**: le hacés una pregunta sobre el código y un agente lector devuelve un resumen compacto, sin gastar el contexto caro del orquestador. |

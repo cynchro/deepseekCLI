@@ -25,6 +25,8 @@ def _fmt_args(name: str, args: dict) -> str:
         return str(args.get("path", ""))
     if name == "grep":
         return f"/{args.get('pattern', '')}/"
+    if name in ("search_code", "explore"):
+        return str(args.get("query", ""))[:70]
     if name == "glob":
         return str(args.get("pattern", ""))
     if name == "run_command":
@@ -42,6 +44,9 @@ def _printer(kind: str, data: dict):
         from core.tasks import render
         body = render(data["data"]).replace("\n", "\n  ")
         print(f"  {_C['cyan']}📋 plan{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}")
+    elif kind == "search_code":
+        print(f"  {_C['cyan']}🔎 search_code{_C['reset']} {_C['dim']}{data.get('query','')[:70]}"
+              f" ({data.get('chunks',0)} chunks){_C['reset']}")
     elif kind == "file_diff":
         for ln in data.get("diff", "").splitlines():
             if ln.startswith("+") and not ln.startswith("+++"):

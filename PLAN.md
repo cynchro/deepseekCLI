@@ -205,6 +205,18 @@ acercar la calidad a Claude Code SIN perder calidad por ahorrar tokens (DeepSeek
 Verificado e2e contra la API: PRO escribe directo (by_model solo pro), edición quirúrgica con diff,
 auto-verify corrió y dejó verde, guard bloquea edición a ciegas, auto-verify respeta plan/remoto.
 
+**Fase 8 — RAG en el loop (escala a codebases grandes)** ✅ (branch `feat/quality-direct-write`).
+DeepSeek NO tiene endpoint de embeddings (verificado: 404, solo `v4-pro`/`v4-flash`), así que el
+retrieval es **BM25 léxico** en Python puro (sin deps, offline), con tokenización code-aware
+(parte camelCase/snake_case). `core/rag.py` (`CodeIndex`: chunker por ventanas de líneas + índice
+incremental por fingerprint mtime+size, persistido en `.deep/index/`) + tool `search_code` que
+rankea por relevancia y devuelve fragmentos con archivo:línea (cacheada en el ToolContext por run).
+Es read-only (incluida en `_EXPLORE_READONLY`). System prompt guía a usarla antes de grepear a
+ciegas. Limpieza: se eliminó el `.rag/` viejo (artefactos v1). Limitación conocida: al ser léxico,
+una consulta en español contra identificadores en inglés matchea poco — el scoring queda desacoplado
+para enchufar embeddings locales (fastembed) como dep opcional si se quiere semántica real.
+Verificado e2e: en core/ (32 archivos, 90 chunks) el agente ubicó estimate_cost en 3 pasos.
+
 ---
 
 ## 7. Reglas de oro (para que sea v2 ESTABLE, no beta)
