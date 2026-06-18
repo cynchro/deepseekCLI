@@ -7,6 +7,33 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-18
+
+Salto de calidad estilo Claude Code: el modelo fuerte escribe el código (se revierte
+el "truco de tokens"), con diffs visibles, edición quirúrgica y verificación automática.
+La premisa: maximizar la calidad sin perderla por ahorrar tokens — DeepSeek ya es barato.
+
+### Changed
+- **PRO escribe el código directo** con `write_file`/`edit_file`, en vez de delegar los
+  bytes a FLASH. El techo de calidad pasa a ser PRO, no el modelo débil. `generate_code`/
+  `apply_edit` (FLASH) quedan como excepción para volumen mecánico de bajo riesgo. System
+  prompt reescrito con disciplina de código (seguir convenciones, no inventar APIs, ser
+  quirúrgico) y un loop de verificación obligatorio.
+- **`apply_edit` quirúrgico**: FLASH devuelve bloques `SEARCH/REPLACE` que se aplican de
+  forma determinística, en vez de reescribir el archivo entero (se elimina el drift).
+
+### Added
+- **`explore`**: investigación read-only delegada a FLASH. PRO le hace una pregunta sobre
+  el código y un mini-agente lector (solo `read_file`/`grep`/`list_dir`/`glob`) devuelve un
+  resumen compacto, descargando el contexto caro de PRO sin tocar la calidad.
+- **Diffs visibles**: `edit_file`/`write_file`/`apply_edit` muestran el diff real en la
+  consola y se lo devuelven a PRO para auto-revisión.
+- **Verificación automática**: tras un turno que tocó código, corre los tests del proyecto
+  (pytest / `npm test` detectados) y reinyecta el fallo al loop hasta dejarlo en verde
+  (máx 2 intentos). Respeta los permisos: en modo plan o remoto (shell bloqueado) no corre.
+- **Guard read-before-edit**: editar un archivo no leído en la sesión se bloquea (anti-alucinación).
+- FLASH (`generate_code`/`apply_edit`) hereda el `project_context` (DEEP.md) y las reglas.
+
 ## [0.3.0] - 2026-06-17
 
 Escala a proyectos grandes con dos patrones de Claude Code: lista de tareas
