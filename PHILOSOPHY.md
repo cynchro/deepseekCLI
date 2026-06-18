@@ -4,43 +4,61 @@
 
 ---
 
-## You describe, the machine builds
+## You talk, the agent works
 
-Programming is communication. Most of the time you know *what* you want to build — the hard part is translating that intent into working code across a dozen files. `deep` shortens that gap: describe what you need in plain language and get a functional project back, ready to run.
+Programming is communication. You know *what* you want — the hard part is translating that
+intent into working code across a dozen files. `deep` is an agent: you describe the task in
+plain language and it operates on your project with tools — reading, searching, writing,
+running, verifying — and iterates until it's done. Not a one-shot generator: a loop that
+observes its own results and keeps going.
+
+---
+
+## The strong model writes the code
+
+The quality of generated code is capped by whichever model actually writes the bytes. So the
+model that reasons about the task is the same one that writes every line that matters — we
+don't hand the writing to a cheaper, weaker model to save tokens. DeepSeek is already cheap;
+trading quality for a few tokens is a bad deal. The fast model earns its place doing low-risk,
+high-volume work: reading and summarizing code, compacting context, mechanical boilerplate.
+
+---
+
+## Verify, don't assume
+
+Code that "looks done" isn't done. After touching code, `deep` runs the project's tests, reads
+the failures, and fixes them — iterating until green. The agent is pushed to verify its own
+work, and the harness runs the tests automatically as a safety net so nothing closes red.
+
+---
+
+## Be surgical
+
+Edits change only the lines that need to change. `deep` never rewrites a whole file for a
+small change, never reformats unrelated code, and shows you the real diff of everything it
+touches. It reads a file before editing it, so it doesn't invent content.
 
 ---
 
 ## Local first, no lock-in
 
-Your code lives on your machine. Your API key stays on your machine. `deep` is a CLI tool, not a cloud service — there's no account, no telemetry, no subscription. You own the output.
-
-The only external dependency is the DeepSeek API (or any compatible model you configure). If you want to run everything locally with a local LLM, that's a valid path too.
-
----
-
-## The system should learn
-
-A single build is useful. A system that gets better with each build is powerful.
-
-`deep` stores structured experiences from every run — what worked, what failed, why. It uses that memory to inform the planning phase of future builds. The more you use it, the more context it has about what approaches work for your kind of tasks.
+Your code lives on your machine. Your API key stays on your machine. `deep` is a CLI tool, not
+a cloud service — no account, no telemetry, no subscription. The only external dependency is
+the DeepSeek API (or any compatible model you configure). You own the output.
 
 ---
 
-## Honest evaluation
+## Permissions you control
 
-Generated code isn't always good. `deep` evaluates its own output after every build using a second model pass, reports issues explicitly, and offers to fix them. We'd rather show you a 6/10 with a list of real problems than pretend everything is fine.
-
----
-
-## Simple tools, composable
-
-`build`, `ask`, `fix`, `update`, `show` — each command does one thing well. They compose: `build` a project, `ask` questions about it, `update` it incrementally, `fix` what broke. No magic, no hidden state (other than what's explicitly stored in `.deep/`).
+The agent asks before it writes to disk or runs a command. Modes (`ask` / `auto` / `plan` /
+`yolo`) let you decide how much rope it gets — from read-only planning to fully autonomous.
 
 ---
 
 ## Open source because it should be
 
-Tools that help people build software belong to everyone. `deep` is MIT licensed. Fork it, modify it, make it yours.
+Tools that help people build software belong to everyone. `deep` is MIT licensed. Fork it,
+modify it, make it yours.
 
 ---
 
