@@ -14,6 +14,7 @@ class ToolContext:
     confirm: Callable[[str], bool] = lambda desc: True
     builder: object = None  # CodeBuilder (FLASH) para generate_code / apply_edit
     spawn: Callable[..., str] = None  # delega una tarea a un sub-agente (spawn_agent)
+    explore: Callable[..., str] = None  # investigación read-only delegada a FLASH (explore)
 
 
 def safe_path(ctx: ToolContext, path: str) -> Path:

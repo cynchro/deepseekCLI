@@ -14,8 +14,23 @@ from core import tasks as _taskstore
 from core.builder import CodeBuilder
 from core.client import DeepSeekClient
 from core.models import MODEL_FLASH, MODEL_PRO
-from core.tools import schemas, dispatch
+from core.tools import schemas, dispatch, tool_names
 from core.tools.base import ToolContext
+
+# Investigador read-only (FLASH): solo lee, nunca escribe ni ejecuta.
+_EXPLORE_READONLY = {"read_file", "grep", "list_dir", "glob"}
+
+EXPLORE_SYSTEM = """Sos un investigador de código de solo lectura. Otro agente te hace
+una pregunta sobre este proyecto y vos la respondés explorando el workspace.
+
+- Usá read_file, grep, list_dir y glob para encontrar la respuesta. No tenés más herramientas:
+  no escribís, no editás, no ejecutás nada.
+- Sé factual y concreto: signaturas de funciones/clases, rutas con archivo:línea, cómo se
+  usa o se conecta algo, convenciones que detectes. Citá ubicaciones exactas.
+- No opines ni propongas cambios; solo reportá lo que ES.
+- Cuando tengas la respuesta, respondé en texto (sin más tool calls) con un resumen COMPACTO
+  y autosuficiente: quien te preguntó no ve los archivos, solo tu resumen. Nada de volcar
+  archivos enteros; extraé lo relevante."""
 
 DEFAULT_SYSTEM = """Sos deep, un agente de programación senior que trabaja en una terminal.
 Resolvés la tarea del usuario operando sobre el workspace con herramientas.
@@ -54,6 +69,9 @@ que importa.
 
 # Exploración y flujo
 - Explorá con list_dir, glob, grep y read_file antes de asumir la estructura del proyecto.
+- Para entender un área grande o desconocida sin llenar tu contexto, usá explore: le hacés
+  una pregunta a un agente lector (FLASH) que lee/grepea por vos y te devuelve un resumen
+  compacto. Ideal antes de editar código ajeno; vos seguís decidiendo y escribiendo.
 - Trabajás SOLO dentro del workspace.
 
 # Trabajos grandes
@@ -100,6 +118,7 @@ class AgentLoop:
             confirm=confirm or (lambda desc: True),
             builder=self.builder,
             spawn=self._spawn_subagent,
+            explore=self._explore,
         )
         # Tools excluidas: los sub-agentes no tocan el plan global (.deep/tasks.json)
         # y no anidan más allá de max_depth.
@@ -107,7 +126,7 @@ class AgentLoop:
         if is_subagent:
             self.tools_exclude |= {"write_tasks", "update_task"}
         if depth >= max_depth:
-            self.tools_exclude.add("spawn_agent")
+            self.tools_exclude |= {"spawn_agent", "explore"}
 
         sys_prompt = system_prompt or DEFAULT_SYSTEM
         sys_prompt += f"\n\nWorkspace: {self.workspace}"
@@ -159,6 +178,31 @@ class AgentLoop:
         if files:
             summary += "\nArchivos tocados: " + ", ".join(files)
         return summary
+
+    def _explore(self, question: str, paths=None) -> str:
+        """Investigación read-only delegada a FLASH: un mini-agente lee/grepea el
+        workspace (sin escribir ni ejecutar) y devuelve un resumen compacto. Mantiene
+        liviano —y barato— el contexto de PRO, sin tocar la calidad: PRO sigue decidiendo
+        y escribiendo todo el código."""
+        if self.depth >= self.max_depth:
+            return "ERROR: no se puede explorar más profundo (max_depth)"
+        self.on_event("explore_start", {"question": question[:160], "depth": self.depth + 1})
+        _dbg.log("AGENT", f"explore (flash)  depth={self.depth + 1}  q={question[:100]}")
+        child = AgentLoop(
+            self.client, self.workspace, model=MODEL_FLASH,
+            system_prompt=EXPLORE_SYSTEM, project_context=self._project_context,
+            on_event=self.on_event, confirm=lambda desc: False,  # read-only: nada que confirmar
+            max_steps=20, compact_threshold=self.compact_threshold,
+            depth=self.depth + 1, max_depth=self.max_depth, is_subagent=True,
+        )
+        # Solo herramientas de lectura: no escribe, no edita, no ejecuta, no delega.
+        child.tools_exclude = set(tool_names()) - _EXPLORE_READONLY
+        seed = question
+        if paths:
+            seed += "\n\nEmpezá mirando: " + ", ".join(paths)
+        res = child.run(seed)
+        self.on_event("explore_done", {"success": res.get("success"), "depth": self.depth + 1})
+        return (res.get("content") or "").strip() or "(el investigador no devolvió nada)"
 
     def reset(self):
         """Reinicia la conversación preservando el system prompt."""
