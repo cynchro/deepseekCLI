@@ -7,6 +7,21 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-19
+
+Consola bilingüe (español / inglés): apertura a uso internacional.
+
+### Added
+- **Interfaz internacionalizada** (`core/i18n.py`): banner, ayuda, prompts y mensajes de
+  ambos REPLs se muestran en español o inglés según el idioma elegido. Un **único setting**
+  (`language`) controla las respuestas del modelo **y** la interfaz: `es` → consola en
+  español; cualquier otro idioma (`en`/`pt`/`zh`/`fr`/`de`) → consola en inglés (base
+  internacional), con respuestas del modelo en el idioma elegido.
+- **Comando `/lang`** en el REPL agente-first para cambiar de idioma; `config set-lang` del
+  REPL clásico ahora también cambia la interfaz. Ambos REPLs preguntan el idioma en el
+  primer arranque.
+- **`differences.md`**: versión en inglés de `diferencias.md`, enlazadas entre sí.
+
 ## [0.7.1] - 2026-06-19
 
 Cierre estable: modelo de embeddings configurable + validación end-to-end.
