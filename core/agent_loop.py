@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, List
 
 import core.debug as _dbg
+from core import compaction as _compaction
 from core import tasks as _taskstore
 from core.builder import CodeBuilder
 from core.client import DeepSeekClient
@@ -308,34 +309,22 @@ class AgentLoop:
         return None
 
     def _compact_if_needed(self):
-        """Si el historial supera el umbral, resume el trabajo previo con FLASH y
-        lo reemplaza por una nota, preservando system + cola reciente. Corta en un
-        boundary seguro, así funciona también a mitad de un build largo."""
+        """Si el historial supera el umbral, resume el trabajo previo de forma FIEL
+        (map-reduce, sin pre-truncar) y lo reemplaza por una nota, preservando system +
+        cola reciente. Corta en un boundary seguro, así funciona también a mitad de un
+        build largo. Ver core/compaction.py."""
         if self._approx_tokens() < self.compact_threshold:
             return
         cut = self._safe_cut()
         if not cut or cut <= 1:
             return
         head = self.messages[1:cut]
-        convo = "\n".join(
-            f"{m['role'].upper()}: {(m.get('content') or '')[:1500]}"
-            for m in head if m.get("content")
-        )
-        if not convo:
-            return
-        res = self.client.complete(
-            [{"role": "system", "content":
-              "Resumí el trabajo hecho hasta acá preservando: la tarea/objetivo, los "
-              "archivos creados/modificados con sus rutas, las decisiones de arquitectura, "
-              "lo que se probó y su resultado, y lo que queda pendiente. Conciso pero completo."},
-             {"role": "user", "content": convo}],
-            model=MODEL_FLASH, temperature=0.2, max_tokens=1200,
-        )
-        if not res.get("success"):
+        summary_text = _compaction.summarize_head(self.client, head)
+        if not summary_text:
             return
         before = self._approx_tokens()
         summary = {"role": "assistant",
-                   "content": "[Resumen del trabajo previo en esta tarea]\n" + res["content"]}
+                   "content": _compaction.SUMMARY_MARKER + "\n" + summary_text}
         self.messages = [self.messages[0], summary] + self.messages[cut:]
         self.on_event("compact", {"tokens_before": before, "tokens_after": self._approx_tokens()})
         _dbg.log("AGENT", f"compactado  {before} -> {self._approx_tokens()} tokens aprox")
