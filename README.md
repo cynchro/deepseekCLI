@@ -233,7 +233,8 @@ Hay ejemplos en [`examples/skills/`](examples/skills/) (reviewer, security, docs
 - **Lista de tareas persistente** (`.deep/tasks.json`): para trabajos de varios pasos, el agente
   descompone el trabajo con `write_tasks` y marca el progreso con `update_task`. Se inyecta al
   arrancar, así un build grande **sobrevive** al límite de pasos, al `continuá` y al reinicio.
-  Vela con `/tasks`.
+  Vela con `/tasks`. Si llega al límite de pasos con tareas pendientes, **auto-reanuda** solo
+  (hasta `max_auto_resume` veces) en vez de cortar y pedirte `continuá` a mano.
 - **Subagentes** (`spawn_agent`): el agente delega una parte grande y autocontenida (un módulo,
   un subsistema) a un sub-agente con contexto fresco, que devuelve un resumen compacto — el
   orquestador se mantiene liviano. Con guardas de profundidad y aislamiento del plan global.

@@ -110,10 +110,11 @@ class AgentLoop:
                  max_steps: int = 100, compact_threshold: int = 150000,
                  depth: int = 0, max_depth: int = 2, is_subagent: bool = False,
                  auto_verify: bool = True, parallel_subagents: bool = True,
-                 max_parallel: int = 4):
+                 max_parallel: int = 4, max_auto_resume: int = 3):
         self.client = client
         self.model = model
         self.auto_verify = auto_verify
+        self.max_auto_resume = max_auto_resume
         self._verify_attempts = 0
         self.parallel_subagents = parallel_subagents
         self.max_parallel = max_parallel
@@ -336,6 +337,27 @@ class AgentLoop:
         _dbg.log("AGENT", f"run  task={user_input[:120]}  model={self.model}")
         self._touched = set()
         self._verify_attempts = 0
+        resumes = 0
+        while True:
+            res = self._run_steps()
+            # Si se agotaron los pasos pero el plan tiene tareas abiertas, seguimos solos
+            # (acotado por max_auto_resume) en vez de cortar y pedir 'continuá' a mano.
+            if (res.get("max_steps_reached") and not self.is_subagent
+                    and resumes < self.max_auto_resume
+                    and _taskstore.has_open(_taskstore.load_tasks(self.workspace))):
+                resumes += 1
+                self.on_event("auto_resume", {"attempt": resumes, "max": self.max_auto_resume})
+                _dbg.log("AGENT", f"auto-resume {resumes}/{self.max_auto_resume}")
+                self.messages.append({"role": "user", "content": (
+                    "Alcanzaste el límite de pasos pero quedan tareas pendientes en el plan. "
+                    "Continuá desde donde estabas y seguí hasta completarlas; si alguna no se "
+                    "puede, marcala con update_task: failed y explicá por qué.")})
+                continue
+            return res
+
+    def _run_steps(self) -> dict:
+        """Corre hasta max_steps pasos de tool calling sobre el historial actual. Devuelve
+        la respuesta final, o un dict con max_steps_reached=True si se agotó el presupuesto."""
         _WRITE_TOOLS = {"write_file", "edit_file", "generate_code", "apply_edit"}
 
         for step in range(self.max_steps):

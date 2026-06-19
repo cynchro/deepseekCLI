@@ -69,6 +69,9 @@ def _printer(kind: str, data: dict):
     elif kind == "explore_done":
         icon = "✓" if data.get("success") else "⚠"
         print(f"  {_C['cyan']}🔍 {icon} investigación lista{_C['reset']}")
+    elif kind == "auto_resume":
+        print(f"  {_C['yellow']}↻ límite de pasos alcanzado, quedan tareas — sigo solo "
+              f"({data.get('attempt')}/{data.get('max')}){_C['reset']}")
     elif kind == "parallel_start":
         print(f"  {_C['green']}⫸ {data.get('count')} sub-agentes en paralelo{_C['reset']}")
     elif kind == "parallel_done":

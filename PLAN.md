@@ -236,6 +236,13 @@ verifica una sola vez al cerrar. Flag `parallel_subagents` (default True). Syste
 paralelizar solo partes independientes. Tests deterministas con threading.Barrier (test_parallel.py).
 Verificado e2e: 2 módulos independientes construidos en paralelo (tool calls interleaved), 4 pasos.
 
+**Fase 10 — Auto-resume en builds largos** ✅ (branch `feat/quality-direct-write`). Al agotar
+`max_steps` con tareas abiertas en `.deep/tasks.json`, el loop se auto-reanuda solo (hasta
+`max_auto_resume=3`) en vez de cortar y pedir 'continuá' a mano. `run()` quedó como wrapper de
+`_run_steps()` con un while de resume. No aplica a sub-agentes (los maneja el padre) ni cuando no
+hay plan abierto (una tarea chica que loopea mejor que corte). Tests deterministas con client que
+nunca termina (test_resume.py): reintenta hasta el tope, no reanuda sin tareas abiertas ni en sub-agentes.
+
 ---
 
 ## 7. Reglas de oro (para que sea v2 ESTABLE, no beta)
