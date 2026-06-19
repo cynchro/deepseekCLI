@@ -6,6 +6,7 @@ FLASH en la Fase 2 (tools generate_code/apply_edit). Por ahora el loop corre
 sobre un único modelo (PRO por default).
 """
 import json
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -101,6 +102,21 @@ que importa.
 - Sé conciso y directo. No pidas permiso: actuá."""
 
 
+def _code_language_directive() -> str:
+    """Directiva de idioma del código. Por defecto inglés (estándar de la industria,
+    facilita soporte y reventa); configurable con DEEP_CODE_LANG."""
+    lang = (os.getenv("DEEP_CODE_LANG") or "inglés").strip()
+    return (
+        "\n\n# Idioma\n"
+        "- Conversá y explicá en el idioma del usuario (el del pedido).\n"
+        f"- Pero TODO EL CÓDIGO va en {lang}, sin importar en qué idioma te hablen: nombres "
+        f"de variables, funciones, clases, módulos y archivos; comentarios; docstrings; y "
+        f"mensajes de commit y de log. Es el estándar y facilita el soporte y la reventa.\n"
+        f"- Excepción: los textos visibles al usuario final (UI, i18n, mensajes de la app) "
+        f"seguí lo que pida el proyecto/DEEP.md; si no se aclara, {lang}."
+    )
+
+
 class AgentLoop:
     def __init__(self, client: DeepSeekClient, workspace, *,
                  model: str = MODEL_PRO, system_prompt: str = None,
@@ -152,6 +168,8 @@ class AgentLoop:
             self.tools_exclude |= {"spawn_agent", "explore"}
 
         sys_prompt = system_prompt or DEFAULT_SYSTEM
+        if system_prompt is None:           # solo el agente de trabajo; no el de explore
+            sys_prompt += _code_language_directive()
         sys_prompt += f"\n\nWorkspace: {self.workspace}"
         if rules:
             sys_prompt += "\n\nREGLAS DEL PROYECTO (.deeprules):\n" + \

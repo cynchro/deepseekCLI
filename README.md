@@ -211,6 +211,14 @@ Los tests van en tests/ con pytest.
 No agregues dependencias sin avisar.
 ```
 
+### Idioma del código
+
+Podés describir el proyecto en tu idioma (ej. español) y el agente igual escribe **todo el
+código en inglés** por defecto —nombres, comentarios, docstrings, commits—, que es el estándar
+y facilita soporte/reventa. Conversa con vos en tu idioma, pero el código va en inglés. Para
+cambiarlo, seteá `DEEP_CODE_LANG` (ej. `DEEP_CODE_LANG=español`). Nota: si nombrás un archivo
+explícitamente en otro idioma en el pedido, respeta ese nombre (tu instrucción literal manda).
+
 ---
 
 ## Skills
