@@ -53,6 +53,7 @@ def test_index_skips_its_own_dir():
 def test_tool_returns_locations_and_caches():
     ws = _mk_workspace()
     ctx = ToolContext(workspace=ws)
+    ctx._embedder = None                    # fija BM25: test determinista con o sin fastembed
     out = search_code(ctx, "check_credentials login")
     assert "check_credentials" in out
     assert ":" in out                       # trae archivo:línea
@@ -62,6 +63,7 @@ def test_tool_returns_locations_and_caches():
 def test_tool_empty_query_no_match():
     ws = _mk_workspace()
     ctx = ToolContext(workspace=ws)
+    ctx._embedder = None                    # en BM25 una consulta sin solape no matchea
     assert "sin coincidencias" in search_code(ctx, "zzz_inexistente_xyz")
 
 
