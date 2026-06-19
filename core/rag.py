@@ -51,8 +51,12 @@ def get_embedder():
         from fastembed import TextEmbedding
     except Exception:
         return None
+    # Modelo configurable. Para consultas en español conviene uno multilingüe, ej.
+    # DEEP_EMBED_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2".
+    # Sin setear, usa el default de fastembed (English-centric, liviano).
+    model_name = (os.getenv("DEEP_EMBED_MODEL") or "").strip()
     try:
-        model = TextEmbedding()
+        model = TextEmbedding(model_name=model_name) if model_name else TextEmbedding()
     except Exception:
         return None
 

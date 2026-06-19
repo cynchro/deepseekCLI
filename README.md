@@ -369,6 +369,14 @@ pip install "deepseek-builder[semantic]"   # fastembed, búsqueda semántica en 
 
 Sin `prompt_toolkit` el REPL funciona igual pero en modo básico. Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación. Sin `fastembed`, `search_code` usa BM25 léxico (igual de útil para identificadores); con él, suma matching semántico cross-idioma. Se puede desactivar con `DEEP_NO_SEMANTIC=1`.
 
+El modelo de embeddings es configurable con `DEEP_EMBED_MODEL`. El default es English-centric; si hacés consultas en español conviene un modelo multilingüe:
+
+```bash
+export DEEP_EMBED_MODEL="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+```
+
+(Mejora notablemente el ranking de consultas en español sobre código en inglés.)
+
 ---
 
 ## Compatibilidad
