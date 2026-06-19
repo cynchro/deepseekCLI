@@ -34,7 +34,8 @@ dependencies = [
 [project.optional-dependencies]
 serve = ["fastapi", "uvicorn[standard]", "python-multipart"]
 https = ["trustme", "qrcode"]
-all = ["fastapi", "uvicorn[standard]", "python-multipart", "trustme", "qrcode"]
+semantic = ["fastembed"]
+all = ["fastapi", "uvicorn[standard]", "python-multipart", "trustme", "qrcode", "fastembed"]
 
 [project.urls]
 Homepage = "https://github.com/cynchro/deepseekCLI"

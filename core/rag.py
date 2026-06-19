@@ -13,8 +13,10 @@ un backend de embeddings (ej. fastembed) sin tocar el resto.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import os
 import re
 from collections import Counter
 from pathlib import Path
@@ -33,6 +35,43 @@ _CHUNK_OVERLAP = 15
 
 _WORD = re.compile(r"[A-Za-z0-9_]+")
 _CAMEL = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+|[0-9]+")
+
+# Peso del componente semántico en el score híbrido (el resto es BM25 léxico).
+_HYBRID_ALPHA = 0.5
+
+
+def get_embedder():
+    """Backend de embeddings OPCIONAL y enchufable. Devuelve un callable
+    (list[str] -> list[list[float]]) si hay un backend disponible, o None para caer a
+    BM25 puro. Hoy soporta `fastembed` (dependencia opcional, no se importa salvo acá).
+    Se desactiva con DEEP_NO_SEMANTIC=1."""
+    if os.getenv("DEEP_NO_SEMANTIC"):
+        return None
+    try:
+        from fastembed import TextEmbedding
+    except Exception:
+        return None
+    try:
+        model = TextEmbedding()
+    except Exception:
+        return None
+
+    def embed(texts):
+        return [list(map(float, v)) for v in model.embed(list(texts))]
+
+    return embed
+
+
+def _cosine(a, b) -> float:
+    """Coseno en Python puro (sin numpy, para no agregar deps al camino base)."""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return 0.0
+    return dot / (na * nb)
 
 
 def tokenize(text: str) -> list:
@@ -104,18 +143,26 @@ class CodeIndex:
     k1 = 1.5
     b = 0.75
 
-    def __init__(self, workspace):
+    def __init__(self, workspace, embedder=None):
         self.workspace = Path(workspace).resolve()
         self.dir = self.workspace / ".deep" / "index"
         self.manifest_path = self.dir / "manifest.json"
         self.chunks_path = self.dir / "chunks.json"
+        self.vectors_path = self.dir / "vectors.json"
+        self.embedder = embedder   # callable opcional; None -> solo BM25
         self.manifest = {}      # rel_path -> fingerprint
         self.chunks = []        # [{path, start, end, text}]
+        self.vectors = {}       # chunk_hash -> vector (solo si hay embedder)
         # estructuras BM25 en memoria (se reconstruyen al cargar/indexar)
         self._tf = []           # por chunk: Counter de términos
         self._len = []          # por chunk: longitud en tokens
         self._df = Counter()    # término -> nº de chunks que lo contienen
         self._avgdl = 0.0
+
+    @staticmethod
+    def _chunk_hash(c) -> str:
+        h = hashlib.sha1(f"{c['path']}:{c['start']}:{c['text']}".encode("utf-8"))
+        return h.hexdigest()
 
     # ── persistencia ──────────────────────────────────────────────────────────
     def _load(self):
@@ -124,11 +171,38 @@ class CodeIndex:
             self.chunks = json.loads(self.chunks_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             self.manifest, self.chunks = {}, []
+        if self.embedder is not None:
+            try:
+                self.vectors = json.loads(self.vectors_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                self.vectors = {}
 
     def _save(self):
         self.dir.mkdir(parents=True, exist_ok=True)
         self.manifest_path.write_text(json.dumps(self.manifest), encoding="utf-8")
         self.chunks_path.write_text(json.dumps(self.chunks), encoding="utf-8")
+
+    def _embed_missing(self):
+        """Calcula y persiste los vectores de los chunks que aún no tienen (incremental).
+        Descarta vectores de chunks que ya no existen."""
+        if self.embedder is None:
+            return
+        hashes = [self._chunk_hash(c) for c in self.chunks]
+        missing = [h for h, c in zip(hashes, self.chunks) if h not in self.vectors]
+        if missing:
+            by_hash = {self._chunk_hash(c): c for c in self.chunks}
+            try:
+                vecs = self.embedder([by_hash[h]["text"] for h in missing])
+            except Exception:
+                return  # si el embedder falla, seguimos con BM25 puro
+            for h, v in zip(missing, vecs):
+                self.vectors[h] = v
+        # poda de vectores huérfanos
+        self.vectors = {h: self.vectors[h] for h in hashes if h in self.vectors}
+        try:
+            self.vectors_path.write_text(json.dumps(self.vectors), encoding="utf-8")
+        except OSError:
+            pass
 
     # ── indexado incremental ────────────────────────────────────────────────────
     def build(self) -> dict:
@@ -160,8 +234,9 @@ class CodeIndex:
             self._save()
 
         self._reindex()
+        self._embed_missing()
         return {"files": len(current), "chunks": len(self.chunks),
-                "changed": len(changed) + len(removed)}
+                "changed": len(changed) + len(removed), "semantic": self.embedder is not None}
 
     def _reindex(self):
         self._tf, self._len, self._df = [], [], Counter()
@@ -174,22 +249,18 @@ class CodeIndex:
                 self._df[term] += 1
         self._avgdl = (sum(self._len) / len(self._len)) if self._len else 0.0
 
-    # ── búsqueda ────────────────────────────────────────────────────────────────
-    def search(self, query: str, k: int = 8) -> list:
-        if not self.chunks:
-            return []
+    def _bm25_scores(self, query: str) -> dict:
+        """Score BM25 por chunk para la consulta. {i: score} solo de los que matchean."""
         q_terms = set(tokenize(query))
         if not q_terms:
-            return []
+            return {}
         n = len(self.chunks)
         idf = {}
         for t in q_terms:
             df = self._df.get(t, 0)
             if df:
                 idf[t] = math.log(1 + (n - df + 0.5) / (df + 0.5))
-        if not idf:
-            return []
-        scored = []
+        scores = {}
         for i, tf in enumerate(self._tf):
             dl = self._len[i] or 1
             s = 0.0
@@ -199,10 +270,43 @@ class CodeIndex:
                     s += w * (f * (self.k1 + 1)) / (
                         f + self.k1 * (1 - self.b + self.b * dl / (self._avgdl or 1)))
             if s > 0:
-                scored.append((s, i))
-        scored.sort(reverse=True)
+                scores[i] = s
+        return scores
+
+    # ── búsqueda ────────────────────────────────────────────────────────────────
+    def search(self, query: str, k: int = 8) -> list:
+        """Devuelve los k chunks más relevantes. Con embedder activo usa score híbrido
+        (BM25 léxico + coseno semántico), que además rescata matches que el léxico no ve
+        (ej. consulta en español sobre identificadores en inglés). Sin embedder: BM25 puro."""
+        if not self.chunks:
+            return []
+        bm25 = self._bm25_scores(query)
+
+        use_semantic = (self.embedder is not None and self.vectors)
+        if not use_semantic:
+            ranked = sorted(bm25.items(), key=lambda kv: kv[1], reverse=True)
+            chosen = [(i, s) for i, s in ranked[:k]]
+        else:
+            try:
+                qvec = self.embedder([query])[0]
+            except Exception:
+                qvec = None
+            if qvec is None:
+                ranked = sorted(bm25.items(), key=lambda kv: kv[1], reverse=True)
+                chosen = [(i, s) for i, s in ranked[:k]]
+            else:
+                bm_max = max(bm25.values()) if bm25 else 0.0
+                final = {}
+                for i, c in enumerate(self.chunks):
+                    bm_norm = (bm25.get(i, 0.0) / bm_max) if bm_max else 0.0
+                    cos = max(0.0, _cosine(qvec, self.vectors.get(self._chunk_hash(c), [])))
+                    score = _HYBRID_ALPHA * cos + (1 - _HYBRID_ALPHA) * bm_norm
+                    if score > 0:
+                        final[i] = score
+                chosen = sorted(final.items(), key=lambda kv: kv[1], reverse=True)[:k]
+
         out = []
-        for s, i in scored[:k]:
+        for i, s in chosen:
             c = self.chunks[i]
             out.append({"path": c["path"], "start": c["start"], "end": c["end"],
                         "score": round(s, 3), "text": c["text"]})

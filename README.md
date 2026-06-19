@@ -130,7 +130,7 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | Tool | Qué hace |
 |------|----------|
 | `read_file` / `list_dir` / `glob` / `grep` | Exploración y lectura (determinista, sin LLM). |
-| `search_code` | Recuperación por **relevancia** (índice BM25 local, incremental): ubica "dónde se hace X" en codebases grandes y devuelve los fragmentos más pertinentes con `archivo:línea`. Mejor que grep para orientarse. |
+| `search_code` | Recuperación por **relevancia** (índice BM25 local, incremental): ubica "dónde se hace X" en codebases grandes y devuelve los fragmentos más pertinentes con `archivo:línea`. Mejor que grep para orientarse. Con `pip install "deepseek-builder[semantic]"` suma búsqueda **semántica** (embeddings locales `fastembed`, score híbrido) que además matchea cross-idioma; sin eso, BM25 puro. |
 | `write_file` / `edit_file` | Crear / editar archivos. **El modelo fuerte escribe acá.** `edit_file` es un reemplazo de string quirúrgico (no reescribe el archivo entero). |
 | `run_command` | Corre comandos de shell en el workspace (tests, git, instalar deps), con permiso. |
 | `explore` | Investigación **read-only delegada a FLASH**: le hacés una pregunta sobre el código y un agente lector devuelve un resumen compacto, sin gastar el contexto caro del orquestador. |
@@ -341,10 +341,11 @@ tail -f debug.log                          # seguir en tiempo real
 
 ```bash
 pip install prompt_toolkit          # autocompletado e historial en el REPL
-pip install "deepseek-builder[https]"   # trustme, para deep serve --https
+pip install "deepseek-builder[https]"      # trustme, para deep serve --https
+pip install "deepseek-builder[semantic]"   # fastembed, búsqueda semántica en search_code
 ```
 
-Sin `prompt_toolkit` el REPL funciona igual pero en modo básico. Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación.
+Sin `prompt_toolkit` el REPL funciona igual pero en modo básico. Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación. Sin `fastembed`, `search_code` usa BM25 léxico (igual de útil para identificadores); con él, suma matching semántico cross-idioma. Se puede desactivar con `DEEP_NO_SEMANTIC=1`.
 
 ---
 

@@ -11,17 +11,22 @@ _PREVIEW_LINES = 16
 
 
 def search_code(ctx: ToolContext, query: str, k: int = 8) -> str:
-    from core.rag import CodeIndex
-    # Caché del índice por run: evita recargar chunks.json en cada llamada.
+    from core.rag import CodeIndex, get_embedder
+    # Caché del índice y del embedder por run: evita recargar y recargar el modelo.
     index = getattr(ctx, "_code_index", None)
     if index is None or str(index.workspace) != str(ctx.workspace.resolve()):
-        index = CodeIndex(ctx.workspace)
+        embedder = getattr(ctx, "_embedder", "unset")
+        if embedder == "unset":
+            embedder = get_embedder()        # None si no hay backend semántico
+            ctx._embedder = embedder
+        index = CodeIndex(ctx.workspace, embedder=embedder)
         ctx._code_index = index
     try:
         stats = index.build()
     except Exception as e:
         return f"ERROR indexando el workspace: {e}"
-    ctx.on_event("search_code", {"query": query[:120], "chunks": stats["chunks"]})
+    ctx.on_event("search_code", {"query": query[:120], "chunks": stats["chunks"],
+                                 "semantic": stats.get("semantic", False)})
     results = index.search(query, k=int(k) if k else 8)
     if not results:
         if stats["chunks"] == 0:

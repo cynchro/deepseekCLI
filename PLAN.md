@@ -216,6 +216,14 @@ ciegas. Limpieza: se eliminó el `.rag/` viejo (artefactos v1). Limitación cono
 una consulta en español contra identificadores en inglés matchea poco — el scoring queda desacoplado
 para enchufar embeddings locales (fastembed) como dep opcional si se quiere semántica real.
 Verificado e2e: en core/ (32 archivos, 90 chunks) el agente ubicó estimate_cost en 3 pasos.
+- ✅ Backend de embeddings enchufable (opcional): `get_embedder()` carga `fastembed` si está
+  (dep opcional `[semantic]`), si no devuelve None → BM25 puro. Con embedder, `CodeIndex` calcula
+  y persiste vectores por hash de chunk (incremental) en `.deep/index/vectors.json` y `search`
+  hace score HÍBRIDO (BM25 normalizado + coseno), que además rescata matches cross-idioma que el
+  léxico no ve. Cero deps al cargar el módulo (cosine en Python puro); se apaga con DEEP_NO_SEMANTIC=1.
+  Validado con embedder stub: consulta ES sobre código EN rescata el archivo correcto y descarta
+  el no relacionado; vectores incrementales (no re-embeddea sin cambios). El path real (fastembed)
+  no se pudo correr en el entorno; queda como upgrade opcional documentado.
 
 **Fase 9 — Subagentes en paralelo** ✅ (branch `feat/quality-direct-write`). Cuando el modelo
 emite 2+ `spawn_agent` en el MISMO turno (partes independientes), el loop los corre concurrentes

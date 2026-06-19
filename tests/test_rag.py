@@ -63,3 +63,53 @@ def test_tool_empty_query_no_match():
     ws = _mk_workspace()
     ctx = ToolContext(workspace=ws)
     assert "sin coincidencias" in search_code(ctx, "zzz_inexistente_xyz")
+
+
+# ── camino semántico (embedder opcional) ────────────────────────────────────────
+
+def _stub_embedder(texts):
+    """Embedder falso por conceptos: agrupa sinónimos ES/EN en la misma dimensión,
+    así 'credenciales' (query) y 'credentials' (código) caen cerca aunque no compartan
+    ni un token léxico. Determinista, sin red ni modelo."""
+    auth = {"login", "credentials", "credenciales", "auth", "autenticar",
+            "autenticacion", "autenticación", "password", "usuario", "user"}
+    math = {"prime", "primo", "number", "numero", "número", "factor", "math"}
+    ui = {"button", "render", "boton", "botón", "ui", "html", "label"}
+    out = []
+    for t in texts:
+        tl = t.lower()
+        out.append([float(sum(w in tl for w in group)) for group in (auth, math, ui)])
+    return out
+
+
+def test_semantic_rescues_crosslanguage_query():
+    ws = _mk_workspace()
+    query = "autenticación de credenciales del usuario"   # español; el código está en inglés
+
+    # BM25 puro: sin solape léxico no debería encontrar auth.py
+    lexical = CodeIndex(ws).search(query, k=3)
+    assert all(r["path"] != "auth.py" for r in lexical), "BM25 no debería matchear cross-idioma"
+
+    # Con embedder semántico: auth.py se rescata por coseno
+    idx = CodeIndex(ws, embedder=_stub_embedder)
+    st = idx.build()
+    assert st["semantic"] is True
+    res = idx.search(query, k=3)
+    paths = [r["path"] for r in res]
+    assert res and paths[0] in ("auth.py", "db.py"), res   # rescata lo relacionado a auth
+    assert "ui.py" not in paths                            # y descarta lo no relacionado
+    assert (ws / ".deep" / "index" / "vectors.json").exists()
+
+
+def test_vectors_incremental_reuse():
+    ws = _mk_workspace()
+    CodeIndex(ws, embedder=_stub_embedder).build()
+    calls = {"n": 0}
+
+    def counting_embedder(texts):
+        calls["n"] += len(list(texts))
+        return _stub_embedder(texts)
+
+    # Reconstruir sin cambios: no debería re-embeddear ningún chunk (todos cacheados).
+    CodeIndex(ws, embedder=counting_embedder).build()
+    assert calls["n"] == 0
