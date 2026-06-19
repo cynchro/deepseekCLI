@@ -7,6 +7,29 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-19
+
+Escala a codebases y proyectos grandes con tres mejoras de fondo del agent loop.
+
+### Added
+- **RAG en el loop (`search_code`)**: índice BM25 léxico en Python puro (sin dependencias,
+  offline) con tokenización code-aware (parte camelCase/snake_case). Ubica "dónde se hace X"
+  por relevancia —mejor que grep— y devuelve los fragmentos con `archivo:línea`. Índice
+  incremental por fingerprint (mtime+size), persistido en `.deep/index/`. DeepSeek no expone
+  embeddings (verificado), así que el scoring queda desacoplado para enchufar `fastembed`
+  opcional más adelante. (`core/rag.py`)
+- **Sub-agentes en paralelo**: si el agente emite 2+ `spawn_agent` en el mismo turno (partes
+  independientes), corren concurrentes (ThreadPoolExecutor, `max_parallel=4`) en vez de
+  secuencial. Permisos serializados con lock; los sub-agentes no auto-verifican (evita N
+  pytest a la vez) y el padre verifica una sola vez al cerrar con lo que tocaron todos.
+
+### Changed
+- **Compactación de contexto fiel** (`core/compaction.py`): ya no pre-trunca cada mensaje a
+  1500 chars; usa map-reduce (segmenta, resume y combina) para historiales enormes y un prompt
+  estructurado anti-alucinación con `temperature=0` que prohíbe inventar archivos/decisiones y
+  exige reportar los tests que fallan como fallos. Reemplaza el resumen one-shot que perdía
+  diffs, rutas y resultados (y podía declarar falsamente "tests OK").
+
 ## [0.4.0] - 2026-06-18
 
 Salto de calidad estilo Claude Code: el modelo fuerte escribe el código (se revierte

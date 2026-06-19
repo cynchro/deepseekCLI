@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepseek-builder"
-version = "0.4.0"
+version = "0.5.0"
 description = "Agente de programación con DeepSeek (PRO escribe y verifica / FLASH lee y resume), tools, DEEP.md, skills y PWA remota"
 readme = "README.md"
 license = {text = "MIT"}
