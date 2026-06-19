@@ -1,5 +1,7 @@
 # Diferencias con la versión anterior
 
+> *English version: [differences.md](differences.md).*
+
 > Resumen de qué cambió entre la versión vieja (generador **single-shot**) y la actual
 > (**agente** con herramientas). Para el detalle por release ver [CHANGELOG.md](CHANGELOG.md).
 
@@ -32,6 +34,7 @@ iterando hasta terminar, igual que Claude Code.
 - **Compactación de contexto fiel**: sesiones largas sin perder rutas, decisiones ni resultados.
 - **Control de idioma**: describís en español y el **código sale en inglés** por defecto
   (`DEEP_CODE_LANG`), con comentarios en otro idioma si querés (`DEEP_COMMENT_LANG`).
+  La interfaz de la consola también cambia entre español e inglés con `config set-lang`.
 - **Skills agénticas**, **PWA con agente en vivo** (streaming) y telemetría de tokens/costo.
 
 ## Compatibilidad

@@ -72,22 +72,23 @@ def get_language_instruction() -> str:
 
 def prompt_and_save_language() -> str:
     """Interactive language picker. Returns the chosen language code."""
-    print("\n🌐 Idioma de respuestas / Response language:\n")
+    from core.i18n import t
+    print(t("lang.picker.title"))
     for key, (code, name) in _LANGUAGES.items():
         print(f"   {key}. {name}")
     print()
     while True:
         try:
-            choice = input("   Opción [1]: ").strip() or "1"
+            choice = input(t("lang.picker.option")).strip() or "1"
         except (EOFError, KeyboardInterrupt):
             print()
             return "es"
         if choice in _LANGUAGES:
             lang, name = _LANGUAGES[choice]
             save_language(lang)
-            print(f"   ✅ Idioma guardado: {name}\n")
+            print(t("lang.saved", name=name))
             return lang
-        print("   Opción inválida.")
+        print(t("lang.picker.invalid"))
 
 
 def _add_to_shell(key: str) -> None:
@@ -184,14 +185,15 @@ def prompt_and_save() -> str:
 
 
 def show_config() -> None:
+    from core.i18n import t
     key = load_api_key()
     if key:
         masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-        print(f"  API key : {masked}")
-        print(f"  Archivo : {_CONFIG_FILE}")
+        print(t("config.api_key", masked=masked))
+        print(t("config.file", path=_CONFIG_FILE))
     else:
-        print("  No hay API key guardada.")
-        print(f"  Usá 'deep config set-key' para guardar una.")
+        print(t("config.nokey"))
+        print(t("config.nokey.hint"))
     lang = load_language()
     lang_name = next((n for _, (c, n) in _LANGUAGES.items() if c == lang), lang or "Español")
-    print(f"  Idioma  : {lang_name} ({lang or 'es'})  →  'config set-lang' para cambiar")
+    print(t("config.lang", name=lang_name, code=lang or "es"))

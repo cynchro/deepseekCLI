@@ -21,6 +21,7 @@ except ImportError:
     _HAS_PROMPT_TOOLKIT = False
 
 from core.rules import load_rules
+from core.i18n import t, is_affirmative
 import core.skills as skills_mod
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
                           run_ask, run_skill, run_update, run_doctor, run_upgrade,
@@ -82,38 +83,8 @@ def _banner() -> str:
         "║           deep — Ecosistema DeepSeek             ║\n"
         f"║                    v{ver:<28}║\n"
         "╚══════════════════════════════════════════════════╝\033[0m\n"
-        "  Comandos: agent  build  update  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n"
+        + t("banner.commands")
     )
-
-_HELP = """
-  agent <tarea>          Agente con herramientas (loop estilo Claude Code; conversacional)
-  agent <tarea> --auto   Igual, sin pedir permiso para escribir/ejecutar
-  build <tarea>          Genera un proyecto completo
-  build -t <archivo>     Carga la tarea desde un archivo de texto
-  build <tarea> -f       Genera y corrige automáticamente si falla
-  build <tarea> --model deepseek-reasoner
-  update <cambio>        Modifica el proyecto del directorio actual
-  claudejob              Claude planifica (job.md), DeepSeek construye
-  claudejob --init       Crea la plantilla job.md para completar con Claude
-  claudejob --init --force  Regenera la plantilla aunque exista (guarda .bak)
-  claudejob --review     Vuelca estado para que Claude revise el proyecto
-  claudejob --fix <md>   Aplica las correcciones que escribió Claude
-  ask <pregunta>         Hace una pregunta sin generar proyecto
-  fix                    Corrige errores del proyecto actual
-  show                   Muestra contexto y archivos del proyecto actual
-  serve                  Inicia el servidor web para usar deep desde el celular
-  serve --https          Activa HTTPS para instalar la app en el celular
-  doctor                 Verifica que todo esté configurado correctamente
-  upgrade                Actualiza deep CLI desde GitHub
-  balance                Muestra el crédito disponible
-  history                Muestra las experiencias acumuladas
-  config                 Muestra la configuración guardada
-  config set-key         Guarda una nueva API key
-  config set-lang        Cambia el idioma de las respuestas
-  help                   Esta ayuda
-  reset / new            Reinicia la conversación actual
-  exit / quit / Ctrl+D   Salir
-"""
 
 _STYLE = Style.from_dict({
     "deep":    "#00cc44 bold",
@@ -179,7 +150,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         return False                       # señal de salida
 
     if cmd == "help":
-        print(_HELP)
+        print(t("help"))
 
     elif cmd == "balance":
         run_balance(api_key)
@@ -190,11 +161,11 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
     elif cmd in ("reset", "new"):
         _clear_chat_history()
         state.clear()
-        print("  Conversación reiniciada.")
+        print(t("conversation.reset"))
 
     elif cmd == "ask":
         if not args:
-            print("  Uso: ask <pregunta>")
+            print(t("usage.ask"))
         else:
             state["ask_history"] = run_ask(" ".join(args), api_key, history=None)
             state["in_conversation"] = True
@@ -202,7 +173,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
 
     elif cmd == "update":
         if not args:
-            print("  Uso: update <descripción del cambio>")
+            print(t("usage.update"))
         else:
             run_update(" ".join(args), api_key, Path.cwd(),
                        rules=load_rules(Path.cwd() / ".deeprules"))
@@ -236,8 +207,8 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
 
     elif cmd == "build":
         if not args:
-            print("  Uso: build <descripción del proyecto>")
-            print("       build -t <archivo>  (carga tarea desde archivo)")
+            print(t("usage.build"))
+            print(t("usage.build.taskfile"))
             return True
         model = "deepseek-chat"
         auto_fix = False
@@ -259,17 +230,17 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         if task_file:
             tf = Path(task_file)
             if not tf.exists():
-                print(f"  ❌ Archivo no encontrado: {tf}")
+                print(t("build.file.notfound", path=tf))
                 return True
             task = tf.read_text(encoding="utf-8").strip()
             if not task:
-                print(f"  ❌ El archivo está vacío: {tf}")
+                print(t("build.file.empty", path=tf))
                 return True
-            print(f"  📄 Tarea cargada desde: {tf}")
+            print(t("build.file.loaded", path=tf))
         else:
             task = " ".join(task_parts)
         if not task:
-            print("  Uso: build <descripción del proyecto>")
+            print(t("usage.build"))
             return True
         run_build(
             task=task, api_key=api_key,
@@ -281,7 +252,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
 
     elif cmd == "agent":
         if not args:
-            print("  Uso: agent <tarea>   (conversacional; 'reset' reinicia el agente)")
+            print(t("usage.agent"))
         else:
             from cli.agent_runner import make_agent, run_turn
             auto = "--auto" in args or "-y" in args
@@ -318,7 +289,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
     elif loaded_skills and cmd in loaded_skills:
         skill = loaded_skills[cmd]
         if not args and not state.get("in_conversation"):
-            print(f"  Uso: {cmd} <pregunta>")
+            print(t("usage.skill", cmd=cmd))
         else:
             full_input = " ".join(args) if args else (cmd + " " + " ".join(args)).strip()
             if state.get("active_skill") != cmd:
@@ -344,7 +315,7 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
         _save_chat_history(state)
 
     else:
-        print(f"  Comando desconocido: '{cmd}'. Escribí 'help'.")
+        print(t("unknown.command", cmd=cmd))
 
     return True                            # continuar el loop
 
@@ -354,9 +325,9 @@ def _handle_skill_meta(args: list, loaded_skills: dict):
 
     if sub == "list":
         if not loaded_skills:
-            print("  Sin skills instalados. Creá uno con: skill new <nombre>")
+            print(t("skill.none"))
             return
-        print(f"\n  📦 Skills disponibles ({len(loaded_skills)}):\n")
+        print(t("skill.available", n=len(loaded_skills)))
         for name, sk in loaded_skills.items():
             desc = sk.get("description", "")
             print(f"     {name:<16} {desc}")
@@ -366,55 +337,55 @@ def _handle_skill_meta(args: list, loaded_skills: dict):
         name = args[1] if len(args) > 1 else None
         if not name:
             try:
-                name = input("  Nombre del skill: ").strip()
+                name = input(t("skill.new.name")).strip()
             except (EOFError, KeyboardInterrupt):
                 return
         if not name:
             return
+        end_marker = t("skill.new.end")
         try:
-            desc = input("  Descripción breve: ").strip()
-            print("  System prompt (terminá con una línea que solo diga FIN):")
+            desc = input(t("skill.new.desc")).strip()
+            print(t("skill.new.prompt"))
             lines = []
             while True:
                 line = input()
-                if line.strip().upper() == "FIN":
+                if line.strip().upper() == end_marker:
                     break
                 lines.append(line)
             system_prompt = "\n".join(lines).strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n  Cancelado.")
+            print(t("cancelled"))
             return
         if not system_prompt:
-            print("  El system prompt no puede estar vacío.")
+            print(t("skill.new.empty"))
             return
         try:
-            raw = input("  ¿Local al proyecto? [s/N]: ").strip().lower()
+            raw = input(t("skill.new.local")).strip().lower()
         except (EOFError, KeyboardInterrupt):
             raw = "n"
-        local = raw in ("s", "si", "sí", "y", "yes")
+        local = is_affirmative(raw)
         path = skills_mod.create(name, desc, system_prompt, project_local=local)
-        print(f"  ✅ Skill '{name}' guardado en {path}")
+        print(t("skill.new.saved", name=name, path=path))
         loaded_skills.update(skills_mod.load(Path.cwd()))
 
     else:
-        print(f"  Subcomando desconocido: skill {sub}  (list | new)")
+        print(t("skill.unknown.sub", sub=sub))
 
 
 def run(api_key: str, update_notice: str | None = None):
+    from core.config import load_language, prompt_and_save_language
+    if load_language() is None:
+        prompt_and_save_language()
+
     print(_banner())
     if update_notice:
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-    from core.config import load_language, prompt_and_save_language
-    if load_language() is None:
-        prompt_and_save_language()
-
     if _HAS_PROMPT_TOOLKIT:
         _run_rich(api_key)
     else:
-        print("⚠️  prompt_toolkit no encontrado. Instalá con: pip install prompt_toolkit\n"
-              "   Usando modo básico.\n")
+        print(t("prompt_toolkit.missing"))
         _run_basic(api_key)
 
 
@@ -435,7 +406,8 @@ def _run_rich(api_key: str):
         if saved.get("active_skill"):
             state["active_skill"] = saved["active_skill"]
         n = sum(1 for m in saved["messages"] if m.get("role") == "user")
-        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
+        word = t("word.message.singular") if n == 1 else t("word.message.plural")
+        print(t("conversation.restored", n=n, word=word))
     while True:
         try:
             project = _detect_project()
@@ -443,14 +415,14 @@ def _run_rich(api_key: str):
         except KeyboardInterrupt:
             continue
         except EOFError:
-            print("\n👋 Hasta luego!")
+            print("\n" + t("goodbye"))
             break
 
         cmd, args = _parse(line)
         if cmd is None:
             continue
         if not _handle(cmd, args, api_key, state, loaded_skills):
-            print("👋 Hasta luego!")
+            print(t("goodbye"))
             break
 
 
@@ -464,17 +436,18 @@ def _run_basic(api_key: str):
         if saved.get("active_skill"):
             state["active_skill"] = saved["active_skill"]
         n = sum(1 for m in saved["messages"] if m.get("role") == "user")
-        print(f"  💬 Conversación anterior restaurada ({n} {'mensaje' if n == 1 else 'mensajes'}). Escribí 'reset' para limpiarla.\n")
+        word = t("word.message.singular") if n == 1 else t("word.message.plural")
+        print(t("conversation.restored", n=n, word=word))
     while True:
         try:
             project = _detect_project()
             line = input(_prompt_text(project, state.get("in_conversation", False)))
         except (EOFError, KeyboardInterrupt):
-            print("\n👋 Hasta luego!")
+            print("\n" + t("goodbye"))
             break
         cmd, args = _parse(line)
         if cmd is None:
             continue
         if not _handle(cmd, args, api_key, state, loaded_skills):
-            print("👋 Hasta luego!")
+            print(t("goodbye"))
             break

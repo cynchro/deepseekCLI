@@ -25,7 +25,8 @@ except ImportError:
 import core.skills as skills_mod
 from core.rules import load_rules
 from core.context import load_project_context, project_md_path, INIT_TASK
-from cli.agent_runner import make_agent, run_turn, MODES, _MODE_HELP, _C
+from core.i18n import t, mode_help
+from cli.agent_runner import make_agent, run_turn, MODES, _C
 from cli.commands import (run_balance, run_history, run_doctor, run_show,
                           run_serve, run_upgrade)
 
@@ -47,35 +48,24 @@ def _version() -> str:
             return "?"
 
 
-_BANNER = f"""{_C['bold']}{_C['green']}
-  深度求索
-  deep · agente DeepSeek
-  v{_version()}{_C['reset']}
-  Escribí lo que querés hacer en lenguaje natural.
-  Comandos: {_C['dim']}/help /init /mode /model /skills /cost /clear /exit{_C['reset']}
-"""
+def _banner() -> str:
+    return (
+        f"{_C['bold']}{_C['green']}\n"
+        "  深度求索\n"
+        f"  {t('agent.banner.subtitle')}\n"
+        f"  v{_version()}{_C['reset']}\n"
+        f"  {t('agent.banner.tagline')}\n"
+        f"  {t('agent.banner.commands')} {_C['dim']}/help /init /mode /model /lang /skills /cost /clear /exit{_C['reset']}\n"
+    )
 
-_SLASH = ["/help", "/init", "/tasks", "/mode", "/model", "/skills", "/skill", "/rules",
+
+_SLASH = ["/help", "/init", "/tasks", "/mode", "/model", "/lang", "/skills", "/skill", "/rules",
           "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
           "/serve", "/upgrade", "/exit", "/quit"]
 
-_HELP = f"""
-  {_C['bold']}Uso{_C['reset']}: escribí la tarea en lenguaje natural y el agente la resuelve con sus tools.
 
-  {_C['bold']}Slash commands{_C['reset']}
-    /init            Explora el proyecto y escribe/actualiza DEEP.md
-    /tasks           Muestra el plan de tareas persistente (.deep/tasks.json)
-    /mode [m]        Permisos: {' '.join(MODES)}  (sin arg muestra el actual)
-    /model [pro|flash]  Modelo orquestador del loop (default: pro)
-    /skills          Lista los skills disponibles
-    /skill <n> <t>   Corre una tarea aplicando el skill <n>
-    /rules           Muestra DEEP.md y .deeprules cargados
-    /cost            Tokens y costo estimado por modelo de esta sesión
-    /clear /new      Reinicia la conversación del agente
-    /balance /history /doctor /show /serve /upgrade   Comandos legacy
-    /help            Esta ayuda
-    /exit /quit      Salir
-"""
+def _help() -> str:
+    return t("agent.help", b=_C["bold"], r=_C["reset"], modes=" ".join(MODES))
 
 
 class _Repl:
@@ -99,7 +89,7 @@ class _Repl:
         if cmd in ("/exit", "/quit"):
             return False
         elif cmd == "/help":
-            print(_HELP)
+            print(_help())
         elif cmd == "/init":
             run_turn(self._get_agent(), INIT_TASK)
         elif cmd == "/tasks":
@@ -108,11 +98,14 @@ class _Repl:
         elif cmd == "/clear" or cmd == "/new":
             if self.agent:
                 self.agent.reset()
-            print("  Conversación reiniciada.")
+            print(t("conversation.reset"))
         elif cmd == "/mode":
             self._mode(args)
         elif cmd == "/model":
             self._model(args)
+        elif cmd == "/lang":
+            from core.config import prompt_and_save_language
+            prompt_and_save_language()
         elif cmd == "/cost":
             self._cost()
         elif cmd == "/rules":
@@ -135,51 +128,52 @@ class _Repl:
         elif cmd == "/upgrade":
             run_upgrade()
         else:
-            print(f"  Comando desconocido: {cmd}. Probá /help")
+            print(t("agent.unknown.command", cmd=cmd))
         return True
 
     def _mode(self, args):
         if not args:
             cur = self.agent.permissions.mode if self.agent else self.prefs["mode"]
-            print(f"  Modo actual: {_C['bold']}{cur}{_C['reset']} — {_MODE_HELP[cur]}")
-            print("  Modos: " + ", ".join(f"{m} ({_MODE_HELP[m]})" for m in MODES))
+            print(t("agent.mode.current", b=_C["bold"], mode=cur, r=_C["reset"], desc=mode_help(cur)))
+            print(t("agent.mode.list", modes=", ".join(f"{m} ({mode_help(m)})" for m in MODES)))
             return
         m = args[0].lower()
         if m not in MODES:
-            print(f"  Modo inválido. Opciones: {', '.join(MODES)}")
+            print(t("agent.mode.invalid", modes=", ".join(MODES)))
             return
         self.prefs["mode"] = m
         if self.agent:
             self.agent.permissions.mode = m
-        print(f"  Modo → {_C['bold']}{m}{_C['reset']} ({_MODE_HELP[m]})")
+        print(t("agent.mode.set", b=_C["bold"], mode=m, r=_C["reset"], desc=mode_help(m)))
 
     def _model(self, args):
         from core.models import MODEL_PRO, MODEL_FLASH
         mapping = {"pro": MODEL_PRO, "flash": MODEL_FLASH}
         if not args:
             cur = self.agent.model if self.agent else (self.prefs["model"] or MODEL_PRO)
-            print(f"  Modelo orquestador: {cur}")
+            print(t("agent.model.current", model=cur))
             return
         key = args[0].lower()
         if key not in mapping:
-            print("  Opciones: pro | flash")
+            print(t("agent.model.options"))
             return
         self.prefs["model"] = mapping[key]
         if self.agent:
             self.agent.model = mapping[key]
-        print(f"  Modelo orquestador → {mapping[key]}")
+        print(t("agent.model.set", model=mapping[key]))
 
     def _cost(self):
         if not self.agent:
-            print("  Sin actividad todavía.")
+            print(t("agent.cost.empty"))
             return
         st = self.agent.client.get_stats()
         cache = st.get("cache_hit_tokens", 0)
-        print(f"  Llamadas: {st['successful_calls']}  ·  tokens: {st['total_tokens_used']}"
-              f"  ·  cache hits: {cache}  ·  costo estimado: ${st['estimated_cost_usd']:.4f}")
+        print(t("agent.cost.summary", calls=st["successful_calls"],
+                tokens=st["total_tokens_used"], cache=cache,
+                cost=st["estimated_cost_usd"]))
         for m, v in st.get("by_model", {}).items():
-            print(f"    {m}: {v['calls']} llamadas · {v['tokens']} tok"
-                  f" · {v.get('cache_hit_tokens', 0)} cacheados · ${v['cost_usd']:.4f}")
+            print(t("agent.cost.model", model=m, calls=v["calls"], tokens=v["tokens"],
+                    cache=v.get("cache_hit_tokens", 0), cost=v["cost_usd"]))
 
     def _rules(self):
         rules = load_rules(self.cwd / ".deeprules")
@@ -191,29 +185,29 @@ class _Repl:
         if ctx:
             print(f"\n{ctx[:1500]}")
         if not rules and not ctx:
-            print(f"  Sin DEEP.md ni .deeprules. Creá uno con /init.")
+            print(t("agent.rules.none"))
 
     def _skills(self):
         sk = skills_mod.load(self.cwd)
         if not sk:
-            print("  Sin skills. Creá uno con: skill new (modo legacy) o agregá un .skill")
+            print(t("agent.skills.none"))
             return
-        print(f"  Skills ({len(sk)}):")
+        print(t("agent.skills.list", n=len(sk)))
         for name, s in sk.items():
             print(f"    {name:<16} {s.get('description', '')}")
 
     def _skill(self, args):
         if not args:
-            print("  Uso: /skill <nombre> <tarea>")
+            print(t("agent.skill.usage"))
             return
         name = args[0]
         sk = skills_mod.load(self.cwd)
         if name not in sk:
-            print(f"  Skill '{name}' no encontrado. Ver /skills")
+            print(t("agent.skill.notfound", name=name))
             return
         task = " ".join(args[1:]).strip()
         if not task:
-            print(f"  Uso: /skill {name} <tarea>")
+            print(t("agent.skill.usage.named", name=name))
             return
         prompt = (f"Aplicá las siguientes instrucciones de skill al resolver la tarea.\n"
                   f"--- skill: {name} ---\n{sk[name]['system_prompt']}\n--- fin skill ---\n\n"
@@ -230,7 +224,11 @@ def _prompt_text(repl: "_Repl"):
 
 
 def run(api_key: str, update_notice: str = None):
-    print(_BANNER)
+    from core.config import load_language, prompt_and_save_language
+    if load_language() is None:
+        prompt_and_save_language()
+
+    print(_banner())
     if update_notice:
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -255,7 +253,7 @@ def run(api_key: str, update_notice: str = None):
         except KeyboardInterrupt:
             continue
         except EOFError:
-            print("\n👋 Hasta luego!")
+            print("\n" + t("goodbye"))
             break
         if not line:
             continue
@@ -265,7 +263,7 @@ def run(api_key: str, update_notice: str = None):
             except ValueError:
                 parts = line.split()
             if not repl.slash(parts[0].lower(), parts[1:]):
-                print("👋 Hasta luego!")
+                print(t("goodbye"))
                 break
         else:
             run_turn(repl._get_agent(), line)
