@@ -7,6 +7,20 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-19
+
+Refina la escala: búsqueda semántica opcional y autonomía en builds largos.
+
+### Added
+- **Búsqueda semántica opcional en `search_code`**: con `pip install "deepseek-builder[semantic]"`
+  (fastembed), el índice suma embeddings locales y `search_code` usa score híbrido (BM25 + coseno),
+  que además rescata coincidencias cross-idioma (consulta en español sobre código en inglés). Sin
+  la extra, sigue funcionando con BM25 puro. El backend es perezoso y enchufable (no importa nada
+  pesado al cargar); se apaga con `DEEP_NO_SEMANTIC=1`. Vectores incrementales en `.deep/index/`.
+- **Auto-resume en builds largos**: al agotar `max_steps` con tareas abiertas en el plan
+  (`.deep/tasks.json`), el agente se auto-reanuda solo (hasta `max_auto_resume=3`) en vez de cortar
+  y pedir `continuá` a mano. No aplica a sub-agentes ni cuando no hay plan abierto.
+
 ## [0.5.0] - 2026-06-19
 
 Escala a codebases y proyectos grandes con tres mejoras de fondo del agent loop.
