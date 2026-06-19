@@ -7,6 +7,21 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-19
+
+Control de idioma: describir en tu idioma, obtener código en inglés.
+
+### Added
+- **Código en inglés por defecto** sin importar el idioma del pedido: identificadores,
+  comentarios, docstrings y mensajes de commit/log en inglés (estándar de industria, facilita
+  soporte/reventa). El agente conversa con vos en tu idioma, pero el código va en inglés.
+  Configurable con `DEEP_CODE_LANG` (ej. `=español`).
+- **Idioma de comentarios independiente** (`DEEP_COMMENT_LANG`): permite código en inglés con
+  comentarios/docstrings en otro idioma. Los comentarios referencian los identificadores por su
+  nombre real en inglés, sin traducirlos (ej. `getSeller()`/`seller`). Default = `DEEP_CODE_LANG`.
+- Validado el camino real de la búsqueda semántica con `fastembed` instalado (embeddings de
+  384 dims; rescata coincidencias cross-idioma que BM25 no ve).
+
 ## [0.6.0] - 2026-06-19
 
 Refina la escala: búsqueda semántica opcional y autonomía en builds largos.
