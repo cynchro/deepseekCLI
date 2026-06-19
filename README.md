@@ -215,9 +215,22 @@ No agregues dependencias sin avisar.
 
 Podés describir el proyecto en tu idioma (ej. español) y el agente igual escribe **todo el
 código en inglés** por defecto —nombres, comentarios, docstrings, commits—, que es el estándar
-y facilita soporte/reventa. Conversa con vos en tu idioma, pero el código va en inglés. Para
-cambiarlo, seteá `DEEP_CODE_LANG` (ej. `DEEP_CODE_LANG=español`). Nota: si nombrás un archivo
-explícitamente en otro idioma en el pedido, respeta ese nombre (tu instrucción literal manda).
+y facilita soporte/reventa. Conversa con vos en tu idioma, pero el código va en inglés.
+
+Dos variables de entorno lo controlan, **independientes** entre sí:
+
+| Variable | Controla | Default |
+|----------|----------|---------|
+| `DEEP_CODE_LANG` | Idioma de los **identificadores** (variables, funciones, clases, archivos, commits/log) | `inglés` |
+| `DEEP_COMMENT_LANG` | Idioma de **comentarios y docstrings** | igual que `DEEP_CODE_LANG` |
+
+Así podés tener **código en inglés pero comentarios en español**: `DEEP_COMMENT_LANG=español`.
+Los comentarios referencian los identificadores por su nombre real en inglés (no los traducen):
+una función `getSeller()` queda con ese nombre, y el comentario en español dice algo como
+«`getSeller()` asigna un vendedor en la variable `seller` y lo retorna».
+
+> Si nombrás un archivo explícitamente en otro idioma en el pedido, respeta ese nombre (tu
+> instrucción literal manda).
 
 ---
 

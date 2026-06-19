@@ -103,18 +103,32 @@ que importa.
 
 
 def _code_language_directive() -> str:
-    """Directiva de idioma del código. Por defecto inglés (estándar de la industria,
-    facilita soporte y reventa); configurable con DEEP_CODE_LANG."""
-    lang = (os.getenv("DEEP_CODE_LANG") or "inglés").strip()
-    return (
-        "\n\n# Idioma\n"
-        "- Conversá y explicá en el idioma del usuario (el del pedido).\n"
-        f"- Pero TODO EL CÓDIGO va en {lang}, sin importar en qué idioma te hablen: nombres "
-        f"de variables, funciones, clases, módulos y archivos; comentarios; docstrings; y "
-        f"mensajes de commit y de log. Es el estándar y facilita el soporte y la reventa.\n"
-        f"- Excepción: los textos visibles al usuario final (UI, i18n, mensajes de la app) "
-        f"seguí lo que pida el proyecto/DEEP.md; si no se aclara, {lang}."
-    )
+    """Directiva de idioma. El CÓDIGO (identificadores) va por defecto en inglés (estándar,
+    facilita soporte/reventa). Los COMENTARIOS/docstrings pueden ir en otro idioma de forma
+    independiente. Configurable con DEEP_CODE_LANG y DEEP_COMMENT_LANG (este último cae al
+    idioma del código si no se setea)."""
+    code_lang = (os.getenv("DEEP_CODE_LANG") or "inglés").strip()
+    comment_lang = (os.getenv("DEEP_COMMENT_LANG") or code_lang).strip()
+    out = ("\n\n# Idioma\n"
+           "- Conversá y explicá al usuario en SU idioma (el del pedido).\n")
+    if comment_lang.lower() == code_lang.lower():
+        out += (
+            f"- TODO EL CÓDIGO va en {code_lang}, sin importar en qué idioma te hablen: nombres "
+            f"de variables, funciones, clases, módulos y archivos; comentarios; docstrings; y "
+            f"mensajes de commit y de log.\n")
+    else:
+        out += (
+            f"- Los IDENTIFICADORES van SIEMPRE en {code_lang}: nombres de variables, funciones, "
+            f"clases, módulos y archivos, y los mensajes de commit/log. No los traduzcas.\n"
+            f"- Los COMENTARIOS y DOCSTRINGS van en {comment_lang}, PERO referenciando los "
+            f"identificadores por su nombre REAL en {code_lang}, tal cual (nunca traduzcas un "
+            f"nombre adentro del comentario). Ejemplo: la función se llama `getSeller()` y la "
+            f"variable `seller` (en {code_lang}); el comentario en {comment_lang} dice algo como "
+            f"«getSeller() asigna un vendedor en la variable seller y lo retorna».\n")
+    out += ("- Excepción: los textos visibles al usuario final (UI, i18n, mensajes de la app) "
+            "seguí lo que pida el proyecto/DEEP.md.\n"
+            "- El código en inglés es el estándar y facilita el soporte y la reventa.")
+    return out
 
 
 class AgentLoop:
