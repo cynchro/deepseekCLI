@@ -217,6 +217,17 @@ una consulta en español contra identificadores en inglés matchea poco — el s
 para enchufar embeddings locales (fastembed) como dep opcional si se quiere semántica real.
 Verificado e2e: en core/ (32 archivos, 90 chunks) el agente ubicó estimate_cost en 3 pasos.
 
+**Fase 9 — Subagentes en paralelo** ✅ (branch `feat/quality-direct-write`). Cuando el modelo
+emite 2+ `spawn_agent` en el MISMO turno (partes independientes), el loop los corre concurrentes
+con un ThreadPoolExecutor (`max_parallel=4`), en vez de secuencial. Resultados se devuelven en el
+orden original que espera la API. Thread-safety: client compartido (call_history.append es atómico
+bajo el GIL), confirm serializado con un lock (`_locked_confirm`, así los prompts no se interleavan),
+cada sub-agente es un AgentLoop independiente. Para no disparar N pytest concurrentes, los
+sub-agentes NO auto-verifican: reportan los archivos que tocaron (`self._touched.update`) y el PADRE
+verifica una sola vez al cerrar. Flag `parallel_subagents` (default True). System prompt guía a
+paralelizar solo partes independientes. Tests deterministas con threading.Barrier (test_parallel.py).
+Verificado e2e: 2 módulos independientes construidos en paralelo (tool calls interleaved), 4 pasos.
+
 ---
 
 ## 7. Reglas de oro (para que sea v2 ESTABLE, no beta)

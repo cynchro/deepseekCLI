@@ -237,6 +237,8 @@ Hay ejemplos en [`examples/skills/`](examples/skills/) (reviewer, security, docs
 - **Subagentes** (`spawn_agent`): el agente delega una parte grande y autocontenida (un módulo,
   un subsistema) a un sub-agente con contexto fresco, que devuelve un resumen compacto — el
   orquestador se mantiene liviano. Con guardas de profundidad y aislamiento del plan global.
+  Si emite **varios `spawn_agent` en el mismo turno** (partes independientes entre sí), corren
+  **en paralelo** (threads); el padre verifica una sola vez al final con lo que tocaron todos.
 - **Compactación automática**: cuando el historial crece, los turnos viejos se resumen con FLASH
   preservando objetivo, archivos tocados, decisiones y pendientes.
 

@@ -6,6 +6,8 @@ FLASH en la Fase 2 (tools generate_code/apply_edit). Por ahora el loop corre
 sobre un único modelo (PRO por default).
 """
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable, List
 
@@ -85,6 +87,9 @@ que importa.
 - Para una parte grande y autocontenida (un módulo, un subsistema), podés delegarla con
   spawn_agent: un sub-agente la construye con su propio contexto y te devuelve un resumen.
   Pasale una tarea clara y completa (no ve tu charla). Las tareas chicas hacelas vos directo.
+- Si hay varias partes INDEPENDIENTES entre sí (no se pisan archivos ni dependen una de
+  otra), emití varios spawn_agent en el MISMO turno: corren en paralelo y es más rápido.
+  Si una parte depende del resultado de otra, hacelas en turnos separados (secuencial).
 
 # Cierre
 - Antes de declarar terminado, repasá tu propio diff (lo ves en el resultado de cada
@@ -103,11 +108,17 @@ class AgentLoop:
                  confirm: Callable[[str], bool] = None,
                  max_steps: int = 100, compact_threshold: int = 150000,
                  depth: int = 0, max_depth: int = 2, is_subagent: bool = False,
-                 auto_verify: bool = True):
+                 auto_verify: bool = True, parallel_subagents: bool = True,
+                 max_parallel: int = 4):
         self.client = client
         self.model = model
         self.auto_verify = auto_verify
         self._verify_attempts = 0
+        self.parallel_subagents = parallel_subagents
+        self.max_parallel = max_parallel
+        # Serializa los pedidos de permiso cuando varios sub-agentes corren en paralelo,
+        # así no se pisan los prompts interactivos.
+        self._confirm_lock = threading.Lock()
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.on_event = on_event or (lambda kind, data: None)
@@ -153,10 +164,17 @@ class AgentLoop:
                                + _taskstore.render(td))
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
 
+    def _locked_confirm(self, desc: str) -> bool:
+        """Pide permiso bajo lock: si hay varios sub-agentes en paralelo, los prompts
+        no se interleavan (uno a la vez)."""
+        with self._confirm_lock:
+            return self.ctx.confirm(desc)
+
     def _spawn_subagent(self, task: str, context_files=None) -> str:
         """Lanza un AgentLoop hijo con contexto fresco para una tarea autocontenida.
         Comparte client (telemetría), workspace y permisos. Devuelve un resumen
-        compacto a PRO — no su transcript — para mantener liviano el contexto del padre."""
+        compacto a PRO — no su transcript — para mantener liviano el contexto del padre.
+        Thread-safe: se puede invocar en paralelo con otros sub-agentes."""
         if self.depth >= self.max_depth:
             return "ERROR: no se pueden anidar más sub-agentes (max_depth)"
         touched = []
@@ -169,9 +187,13 @@ class AgentLoop:
         child = AgentLoop(
             self.client, self.workspace, model=self.model,
             rules=self._rules, project_context=self._project_context,
-            on_event=child_event, confirm=self.ctx.confirm,
+            on_event=child_event, confirm=self._locked_confirm,
             max_steps=self.max_steps, compact_threshold=self.compact_threshold,
             depth=self.depth + 1, max_depth=self.max_depth, is_subagent=True,
+            parallel_subagents=self.parallel_subagents, max_parallel=self.max_parallel,
+            # Los sub-agentes no corren los tests (evita N pytest concurrentes sobre el
+            # mismo workspace): reportan lo que tocaron y el PADRE verifica una sola vez.
+            auto_verify=False,
         )
         seed = task
         if context_files:
@@ -180,6 +202,10 @@ class AgentLoop:
         _dbg.log("AGENT", f"spawn subagent  depth={self.depth + 1}  task={task[:100]}")
         res = child.run(seed)
         files = list(dict.fromkeys(t for t in touched if t))
+        # El padre toma nota de lo que tocó el hijo, para auto-verificar una vez al cerrar
+        # (set.update es atómico bajo el GIL, así que es seguro desde threads paralelos).
+        if res.get("success") and files:
+            self._touched.update(files)
         self.on_event("subagent_done", {"success": res.get("success"),
                                          "files": files, "depth": self.depth + 1})
         head = "Sub-agente completó la tarea." if res.get("success") else \
@@ -342,6 +368,8 @@ class AgentLoop:
             self.messages.append(assistant)
 
             if resp.get("finish_reason") == "tool_calls" and tool_calls:
+                # Parseo de todas las llamadas del batch.
+                parsed = []
                 for tc in tool_calls:
                     name = tc["function"]["name"]
                     raw_args = tc["function"].get("arguments") or "{}"
@@ -349,16 +377,47 @@ class AgentLoop:
                         args = json.loads(raw_args)
                     except Exception:
                         args = {}
+                    parsed.append((tc, name, args))
+
+                spawn_calls = [(tc, n, a) for tc, n, a in parsed if n == "spawn_agent"]
+                results = {}  # tc_id -> resultado
+
+                # Si el modelo pidió 2+ sub-agentes en el mismo turno, los corremos en
+                # PARALELO (cada uno es un AgentLoop independiente con su propio contexto).
+                if self.parallel_subagents and len(spawn_calls) >= 2:
+                    for tc, name, args in spawn_calls:
+                        self.on_event("tool_call", {"name": name, "args": args})
+                    self.on_event("parallel_start", {"count": len(spawn_calls)})
+                    _dbg.log("AGENT", f"spawn paralelo  n={len(spawn_calls)}")
+                    workers = min(len(spawn_calls), self.max_parallel)
+                    with ThreadPoolExecutor(max_workers=workers) as ex:
+                        fut_to_id = {ex.submit(dispatch, n, a, self.ctx): tc["id"]
+                                     for tc, n, a in spawn_calls}
+                        for fut, tcid in fut_to_id.items():
+                            results[tcid] = fut.result()
+                            self.on_event("tool_result", {"name": "spawn_agent",
+                                                           "result": results[tcid]})
+                    self.on_event("parallel_done", {"count": len(spawn_calls)})
+                    # El resto de las tools (no spawn) van secuenciales.
+                    rest = [(tc, n, a) for tc, n, a in parsed if n != "spawn_agent"]
+                else:
+                    rest = parsed
+
+                for tc, name, args in rest:
                     self.on_event("tool_call", {"name": name, "args": args})
-                    _dbg.log("AGENT", f"tool={name}  args={raw_args[:200]}")
+                    _dbg.log("AGENT", f"tool={name}  args={json.dumps(args)[:200]}")
                     result = dispatch(name, args, self.ctx)
                     if name in _WRITE_TOOLS and result.startswith("OK") and args.get("path"):
                         self._touched.add(args["path"])
                     self.on_event("tool_result", {"name": name, "result": result})
+                    results[tc["id"]] = result
+
+                # Mensajes 'tool' en el ORDEN original que espera la API.
+                for tc, name, args in parsed:
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
-                        "content": result,
+                        "content": results[tc["id"]],
                     })
                 continue
 

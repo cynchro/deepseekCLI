@@ -69,6 +69,10 @@ def _printer(kind: str, data: dict):
     elif kind == "explore_done":
         icon = "✓" if data.get("success") else "⚠"
         print(f"  {_C['cyan']}🔍 {icon} investigación lista{_C['reset']}")
+    elif kind == "parallel_start":
+        print(f"  {_C['green']}⫸ {data.get('count')} sub-agentes en paralelo{_C['reset']}")
+    elif kind == "parallel_done":
+        print(f"  {_C['green']}⫷ sub-agentes en paralelo listos{_C['reset']}")
     elif kind == "subagent_start":
         print(f"  {_C['green']}↪ sub-agente:{_C['reset']} {data.get('task','')[:80]}")
     elif kind == "subagent_done":
