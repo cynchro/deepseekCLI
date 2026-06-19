@@ -387,7 +387,7 @@ Funciona en Linux, macOS y Windows 10+ (con secuencias ANSI habilitadas automát
 
 ## Changelog
 
-Ver [CHANGELOG.md](CHANGELOG.md). Versión actual: **0.4.0**.
+Ver [CHANGELOG.md](CHANGELOG.md) para el detalle de cada versión.
 
 ## Philosophy
 
