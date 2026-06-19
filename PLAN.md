@@ -236,6 +236,20 @@ verifica una sola vez al cerrar. Flag `parallel_subagents` (default True). Syste
 paralelizar solo partes independientes. Tests deterministas con threading.Barrier (test_parallel.py).
 Verificado e2e: 2 módulos independientes construidos en paralelo (tool calls interleaved), 4 pasos.
 
+**Fase 11 — Cierre / estabilización** ✅ (2026-06-19, v0.7.x).
+- ✅ Idioma: código en inglés por defecto (`DEEP_CODE_LANG`) + comentarios independientes
+  (`DEEP_COMMENT_LANG`). Verificado e2e.
+- ✅ Embeddings configurables (`DEEP_EMBED_MODEL`); con `paraphrase-multilingual-MiniLM-L12-v2`
+  el margen de una consulta ES sobre código EN pasó de ~0.04 a 0.32. Camino real de fastembed
+  validado (384-dim).
+- ✅ **Validación grande end-to-end**: build de una librería de 3 módulos independientes (prompt
+  en español) → descompuso en tareas, delegó los 3 módulos en PARALELO, código en inglés,
+  auto-verify corrió y dejó 87 tests en verde. 9 pasos, ~$0.028. Todo el stack junto, OK.
+- ⏸️ **Decidido NO retirar el single-shot `system.py`**: lo usan la PWA (`/api/run`) y los comandos
+  legacy (`deep build`/`claudejob`); funciona y está aislado. Retirarlo desestabiliza sin upside.
+- ⏸️ **Checkpoints de git: diferido**. Agregar auto-commits introduce comportamiento nuevo (y
+  sorpresas) justo al cerrar estable. Queda como feature futura, no de estabilización.
+
 **Fase 10 — Auto-resume en builds largos** ✅ (branch `feat/quality-direct-write`). Al agotar
 `max_steps` con tareas abiertas en `.deep/tasks.json`, el loop se auto-reanuda solo (hasta
 `max_auto_resume=3`) en vez de cortar y pedir 'continuá' a mano. `run()` quedó como wrapper de

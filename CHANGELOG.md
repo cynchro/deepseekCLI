@@ -7,6 +7,22 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-19
+
+Cierre estable: modelo de embeddings configurable + validación end-to-end.
+
+### Added
+- **`DEEP_EMBED_MODEL`**: elige el modelo de embeddings de `fastembed`. Para consultas en
+  español conviene uno multilingüe (ej. `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`),
+  que mejora notablemente el ranking sobre código en inglés (margen #1 vs #2 de ~0.04 a 0.32).
+
+### Notes
+- Validación grande end-to-end: build de una librería de 3 módulos independientes (prompt en
+  español) que descompuso en tareas, delegó los módulos en paralelo, generó código en inglés y
+  dejó 87 tests en verde vía auto-verify. Todo el stack funcionando junto.
+- Se decidió mantener el motor single-shot legacy (`core/system.py`, usado por la PWA y los
+  comandos `build`/`claudejob`) y diferir los checkpoints de git, por estabilidad.
+
 ## [0.7.0] - 2026-06-19
 
 Control de idioma: describir en tu idioma, obtener código en inglés.
