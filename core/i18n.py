@@ -283,6 +283,29 @@ _STRINGS = {
         "es": "  Uso: /skill {name} <tarea>",
         "en": "  Usage: /skill {name} <task>",
     },
+    # --- bitácora entre sesiones (core/journal.py) ---
+    "journal.last_session": {
+        "es": "  📓 {b}En la última sesión{r} ({stamp}):",
+        "en": "  📓 {b}Last session{r} ({stamp}):",
+    },
+    "journal.done": {"es": "     Hecho: {text}", "en": "     Done: {text}"},
+    "journal.next_step": {"es": "     Próximo: {text}", "en": "     Next: {text}"},
+    "journal.open_tasks": {
+        "es": "     Tareas abiertas: {n}",
+        "en": "     Open tasks: {n}",
+    },
+    "journal.continue_hint": {
+        "es": "     → escribí {b}seguí{r} para continuar, o tu instrucción.\n",
+        "en": "     → type {b}continue{r} to resume, or your instruction.\n",
+    },
+    "journal.saving": {
+        "es": "  📓 guardando bitácora…",
+        "en": "  📓 saving journal…",
+    },
+    "journal.empty": {
+        "es": "  Sin bitácora todavía en este proyecto.",
+        "en": "  No journal yet in this project.",
+    },
 }
 
 _MODE_HELP = {

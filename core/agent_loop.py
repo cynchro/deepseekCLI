@@ -14,6 +14,7 @@ from typing import Callable, List
 
 import core.debug as _dbg
 from core import compaction as _compaction
+from core import journal as _journal
 from core import tasks as _taskstore
 from core.builder import CodeBuilder
 from core.client import DeepSeekClient
@@ -196,6 +197,11 @@ class AgentLoop:
                 sys_prompt += ("\n\nTAREAS EN CURSO (de una sesión anterior, .deep/tasks.json) — "
                                "continuá desde acá, no rehagas lo completado:\n"
                                + _taskstore.render(td))
+            recap = _journal.load_recap(self.workspace)
+            if recap:
+                sys_prompt += ("\n\nBITÁCORA — última sesión en este proyecto (.deep/journal.md). "
+                               "Si el usuario pide continuar ('seguí', 'dale', etc.), retomá desde acá:\n"
+                               + recap)
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
 
     def _locked_confirm(self, desc: str) -> bool:
