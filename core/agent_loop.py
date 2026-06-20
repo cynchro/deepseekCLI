@@ -200,7 +200,9 @@ class AgentLoop:
             recap = _journal.load_recap(self.workspace)
             if recap:
                 sys_prompt += ("\n\nBITÁCORA — última sesión en este proyecto (.deep/journal.md). "
-                               "Si el usuario pide continuar ('seguí', 'dale', etc.), retomá desde acá:\n"
+                               "Si el usuario pide continuar ('seguí', 'dale', etc.), retomá desde acá. "
+                               "Es SOLO LECTURA para vos: NO edites ni escribas .deep/journal.md, "
+                               "se actualiza solo al cerrar la sesión.\n"
                                + recap)
         self.messages: List[dict] = [{"role": "system", "content": sys_prompt}]
 
