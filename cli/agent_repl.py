@@ -23,8 +23,10 @@ except ImportError:
     _HAS_PT = False
 
 import core.skills as skills_mod
+from core import journal as _journal
 from core.rules import load_rules
 from core.context import load_project_context, project_md_path, INIT_TASK
+from core.tasks import load_tasks, has_open
 from core.i18n import t, mode_help
 from cli.agent_runner import make_agent, run_turn, MODES, _C
 from cli.commands import (run_balance, run_history, run_doctor, run_show,
@@ -59,8 +61,8 @@ def _banner() -> str:
     )
 
 
-_SLASH = ["/help", "/init", "/tasks", "/mode", "/model", "/lang", "/skills", "/skill", "/rules",
-          "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
+_SLASH = ["/help", "/init", "/tasks", "/recap", "/mode", "/model", "/lang", "/skills", "/skill",
+          "/rules", "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
           "/serve", "/upgrade", "/exit", "/quit"]
 
 
@@ -93,9 +95,13 @@ class _Repl:
         elif cmd == "/init":
             run_turn(self._get_agent(), INIT_TASK)
         elif cmd == "/tasks":
-            from core.tasks import load_tasks, render
+            from core.tasks import render
             print("  " + render(load_tasks(self.cwd)).replace("\n", "\n  "))
+        elif cmd == "/recap":
+            recap = _journal.load_recap(self.cwd)
+            print("  " + recap.replace("\n", "\n  ") if recap else t("journal.empty"))
         elif cmd == "/clear" or cmd == "/new":
+            _finalize_session(self)        # cierra la bitácora de lo hecho antes de limpiar
             if self.agent:
                 self.agent.reset()
             print(t("conversation.reset"))
@@ -215,6 +221,51 @@ class _Repl:
         run_turn(self._get_agent(), prompt)
 
 
+def _did_work(agent) -> bool:
+    """True si la sesión tuvo trabajo real (al menos un turno de usuario)."""
+    return bool(agent and any(m.get("role") == "user" for m in agent.messages[1:]))
+
+
+def _finalize_session(repl: "_Repl") -> None:
+    """Al cerrar (o /new), resume la sesión con FLASH y la agrega a .deep/journal.md.
+    Nunca rompe la salida: cualquier error se traga en silencio."""
+    if not _did_work(repl.agent):
+        return
+    print(t("journal.saving"))
+    try:
+        entry = _journal.summarize_session(repl.agent.client, repl.agent.messages)
+        if entry:
+            _journal.append_entry(repl.cwd, entry)
+    except Exception:
+        pass
+
+
+def _recap_banner(repl: "_Repl") -> None:
+    """Al abrir, muestra la última entrada de la bitácora + tareas abiertas."""
+    recap = _journal.load_recap(repl.cwd)
+    if not recap:
+        return
+    stamp, done, nxt = "", "", ""
+    for line in recap.splitlines():
+        s = line.strip()
+        if s.startswith("## "):
+            stamp = s[3:].strip()
+        elif s.startswith("**Hecho:**"):
+            done = s[len("**Hecho:**"):].strip()
+        elif s.startswith("**Próximo paso:**"):
+            nxt = s[len("**Próximo paso:**"):].strip()
+    print(t("journal.last_session", b=_C["bold"], r=_C["reset"], stamp=stamp))
+    if done:
+        print(t("journal.done", text=done[:300]))
+    if nxt:
+        print(t("journal.next_step", text=nxt[:300]))
+    n_open = sum(1 for x in load_tasks(repl.cwd).get("tasks", [])
+                 if x.get("status") in ("pending", "in_progress"))
+    if n_open:
+        print(t("journal.open_tasks", n=n_open))
+    print(t("journal.continue_hint", b=_C["bold"], r=_C["reset"]))
+
+
 def _prompt_text(repl: "_Repl"):
     mode = repl.prefs["mode"] if repl.agent is None else repl.agent.permissions.mode
     tag = "" if mode == "ask" else f" ({mode})"
@@ -233,6 +284,7 @@ def run(api_key: str, update_notice: str = None):
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     repl = _Repl(api_key)
+    _recap_banner(repl)
 
     if _HAS_PT:
         style = Style.from_dict({"deep": "#00cc44 bold", "arrow": "#00cc44 bold",
@@ -253,7 +305,9 @@ def run(api_key: str, update_notice: str = None):
         except KeyboardInterrupt:
             continue
         except EOFError:
-            print("\n" + t("goodbye"))
+            print()
+            _finalize_session(repl)
+            print(t("goodbye"))
             break
         if not line:
             continue
@@ -263,6 +317,7 @@ def run(api_key: str, update_notice: str = None):
             except ValueError:
                 parts = line.split()
             if not repl.slash(parts[0].lower(), parts[1:]):
+                _finalize_session(repl)
                 print(t("goodbye"))
                 break
         else:
