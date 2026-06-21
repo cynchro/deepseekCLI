@@ -21,9 +21,14 @@ import re
 from collections import Counter
 from pathlib import Path
 
-_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".deep",
-              "dist", "build", ".rag", ".pytest_cache", ".mypy_cache", ".idea",
-              ".egg-info", "site-packages"}
+_SKIP_DIRS = {".git", "node_modules", "vendor", "__pycache__", ".venv", "venv",
+              ".deep", "dist", "build", ".rag", ".pytest_cache", ".mypy_cache",
+              ".idea", ".egg-info", "site-packages"}
+
+# Tamaño de lote al calcular embeddings. Embeber miles de chunks en una sola
+# llamada hace explotar la RAM (el modelo + onnxruntime materializa todo junto);
+# en lotes el pico queda acotado sin importar el tamaño del repo.
+_EMBED_BATCH = 32
 _SKIP_SUFFIXES = {".lock", ".min.js", ".map", ".png", ".jpg", ".jpeg", ".gif",
                   ".pdf", ".zip", ".tar", ".gz", ".whl", ".npy", ".bin", ".ico",
                   ".woff", ".woff2", ".ttf", ".mp4", ".mp3"}
@@ -195,13 +200,21 @@ class CodeIndex:
         missing = [h for h, c in zip(hashes, self.chunks) if h not in self.vectors]
         if missing:
             by_hash = {self._chunk_hash(c): c for c in self.chunks}
-            try:
-                vecs = self.embedder([by_hash[h]["text"] for h in missing])
-            except Exception:
-                return  # si el embedder falla, seguimos con BM25 puro
-            for h, v in zip(missing, vecs):
-                self.vectors[h] = v
-        # poda de vectores huérfanos
+            # Por lotes: acota el pico de RAM y persiste el progreso, así una
+            # interrupción no obliga a recalcular todo desde cero la próxima vez.
+            for i in range(0, len(missing), _EMBED_BATCH):
+                batch = missing[i:i + _EMBED_BATCH]
+                try:
+                    vecs = self.embedder([by_hash[h]["text"] for h in batch])
+                except Exception:
+                    break  # si el embedder falla, persistimos lo hecho y seguimos con BM25
+                for h, v in zip(batch, vecs):
+                    self.vectors[h] = v
+                self._persist_vectors(hashes)
+        self._persist_vectors(hashes)
+
+    def _persist_vectors(self, hashes):
+        """Poda vectores huérfanos y persiste el índice de vectores en disco."""
         self.vectors = {h: self.vectors[h] for h in hashes if h in self.vectors}
         try:
             self.vectors_path.write_text(json.dumps(self.vectors), encoding="utf-8")
