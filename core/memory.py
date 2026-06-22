@@ -5,14 +5,16 @@ from pathlib import Path
 from typing import Dict, List
 
 from core.client import DeepSeekClient
+from core.models import MODEL_FLASH
 
 _EXPERIENCES_FILE = Path.home() / ".config" / "deep" / "experiences.json"
 _MAX_STORED = 100
 
 
 class DeepSeekMemory:
-    def __init__(self, client: DeepSeekClient):
+    def __init__(self, client: DeepSeekClient, model: str = MODEL_FLASH):
         self.client = client
+        self.model = model
         self.experiences: List[Dict] = []
         self.patterns = defaultdict(list)
         self._load_experiences()
@@ -50,6 +52,7 @@ class DeepSeekMemory:
             prompt,
             system_prompt="Eres un sistema experto en análisis de patrones. Responde SIEMPRE con JSON estructurado.",
             temperature=0.3, max_tokens=500,
+            model_override=self.model,
         )
         try:
             raw = response.get("content") or ""
@@ -72,31 +75,13 @@ class DeepSeekMemory:
             f"Identifica patrones en estas experiencias de desarrollo:\n{summary}\n\nResponde JSON con lista de patrones.",
             system_prompt="Eres un detector de patrones experto. Responde JSON.",
             temperature=0.3, max_tokens=400,
+            model_override=self.model,
         )
         try:
             patterns = json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))
             return patterns if isinstance(patterns, list) else [patterns]
         except Exception:
             return [{"pattern": "No se pudieron identificar patrones"}]
-
-    def predict_success(self, context: str, proposed_action: str) -> Dict:
-        similar = self._find_similar(context)
-        if not similar:
-            return {"probability": 0.5, "confidence": 0.3, "based_on": "Sin experiencias previas"}
-        summary = "\n".join(
-            f"- {exp['context'][:80]} | éxito={exp['success']} | {exp.get('lesson','')[:80]}"
-            for exp in similar[:5]
-        )
-        response = self.client.chat(
-            f"Experiencias previas:\n{summary}\n\nContexto: {context[:200]}\nAcción: {proposed_action[:200]}\n\n"
-            'Predice probabilidad de éxito. JSON: {"probability":0-1,"confidence":0-1,"risks":[],"recommendations":[]}',
-            system_prompt="Eres un predictor experto. Responde JSON.",
-            temperature=0.2, max_tokens=300,
-        )
-        try:
-            return json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))
-        except Exception:
-            return {"probability": 0.5, "confidence": 0.3, "risks": [], "recommendations": []}
 
     def _find_similar(self, context: str, top_k: int = 5) -> List[Dict]:
         if not self.experiences:

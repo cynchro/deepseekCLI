@@ -12,8 +12,8 @@ from core.config import load_language
 # language that is not Spanish.
 _STRINGS = {
     "banner.commands": {
-        "es": "  Comandos: agent  build  update  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n",
-        "en": "  Commands: agent  build  update  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n",
+        "es": "  Comandos: agent  build  update  scan  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n",
+        "en": "  Commands: agent  build  update  scan  claudejob  ask  fix  show  doctor  upgrade  balance  history  reset  help  exit\n",
     },
     "help": {
         "es": """
@@ -24,6 +24,8 @@ _STRINGS = {
   build <tarea> -f       Genera y corrige automáticamente si falla
   build <tarea> --model deepseek-reasoner
   update <cambio>        Modifica el proyecto del directorio actual
+  scan                   Analiza un proyecto existente y arma su contexto
+  scan -r                Re-analiza (refresca el contexto cacheado)
   claudejob              Claude planifica (job.md), DeepSeek construye
   claudejob --init       Crea la plantilla job.md para completar con Claude
   claudejob --init --force  Regenera la plantilla aunque exista (guarda .bak)
@@ -53,6 +55,8 @@ _STRINGS = {
   build <task> -f        Generate and auto-fix on failure
   build <task> --model deepseek-reasoner
   update <change>        Modify the project in the current directory
+  scan                   Analyze an existing project and build its context
+  scan -r                Re-analyze (refresh the cached context)
   claudejob              Claude plans (job.md), DeepSeek builds
   claudejob --init       Create the job.md template to fill in with Claude
   claudejob --init --force  Regenerate the template even if it exists (keeps .bak)

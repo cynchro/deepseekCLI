@@ -25,7 +25,7 @@ from core.i18n import t, is_affirmative
 import core.skills as skills_mod
 from cli.commands import (run_build, run_balance, run_history, run_fix_current,
                           run_ask, run_skill, run_update, run_doctor, run_upgrade,
-                          run_show, run_serve, run_claudejob)
+                          run_show, run_serve, run_scan, run_claudejob)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -98,7 +98,7 @@ def _build_completer(skill_names: list):
     base = {
         "agent":   None,
         "build":   None, "update":  None, "ask":     None,
-        "fix":     None, "show":    None, "serve":   None,
+        "scan":    None, "fix":     None, "show":    None, "serve":   None,
         "doctor":  None, "upgrade": None, "balance": None,
         "history": None, "config":  {"set-key": None, "set-lang": None},
         "claudejob": {"--init": None, "--review": None, "--fix": None},
@@ -120,6 +120,24 @@ def _detect_project() -> str:
         except Exception:
             pass
     return ""
+
+
+def _auto_onboard(api_key: str) -> None:
+    """Si la carpeta actual es un proyecto existente sin contexto, lo analiza una vez."""
+    if (Path.cwd() / ".deep" / "context.json").exists():
+        return  # ya onboardeado o generado por deep
+    try:
+        from core.project_scanner import scan
+        pmap = scan(Path.cwd())
+    except Exception:
+        return
+    if not pmap.get("subprojects"):
+        return  # no parece un proyecto reconocible → no gastar una llamada
+    print("\n🆕 Proyecto existente detectado sin contexto previo.")
+    try:
+        run_scan(api_key, Path.cwd())
+    except Exception as e:
+        print(f"⚠️  No se pudo analizar el proyecto: {e}")
 
 
 def _prompt_text(project: str, in_chat: bool = False) -> "HTML | str":
@@ -180,6 +198,9 @@ def _handle(cmd: str, args: list, api_key: str, state: dict, loaded_skills: dict
 
     elif cmd == "show":
         run_show(Path.cwd())
+
+    elif cmd == "scan":
+        run_scan(api_key, Path.cwd(), refresh="-r" in args or "--refresh" in args)
 
     elif cmd == "serve":
         use_https = "--https" in args
@@ -381,6 +402,8 @@ def run(api_key: str, update_notice: str | None = None):
     if update_notice:
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    _auto_onboard(api_key)
 
     if _HAS_PROMPT_TOOLKIT:
         _run_rich(api_key)

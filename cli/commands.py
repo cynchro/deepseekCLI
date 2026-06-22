@@ -37,6 +37,7 @@ def run_build(task: str, api_key: str, output_dir: str,
     print(f"\n🚀 Generando: {task}")
     print(f"📁 Proyecto:  {project_name}")
     print(f"📂 Destino:   {Path(output_dir).resolve()}")
+    print(f"⚙️  Modo:      agente adaptativo (re-plan + memoria intra-build)")
     if rules:
         print(f"📏 Reglas:    {len(rules)} cargadas desde .deeprules")
 
@@ -837,9 +838,21 @@ def run_show(project_dir: Path) -> None:
     plan = ctx.get("plan", "")
     if plan:
         print("\n  📐 Plan:\n")
-        for line in plan[:600].split("\n"):
-            if line.strip():
-                print(f"     {line}")
+        if isinstance(plan, dict):
+            arch = plan.get("architecture", "")
+            if arch:
+                for line in arch[:600].split("\n"):
+                    if line.strip():
+                        print(f"     {line}")
+            files = plan.get("files", [])
+            if files:
+                print(f"\n     Archivos planificados ({len(files)}):")
+                for f in files[:12]:
+                    print(f"       - {f.get('path', '?')}")
+        else:
+            for line in str(plan)[:600].split("\n"):
+                if line.strip():
+                    print(f"     {line}")
 
     files = sorted(
         f for f in project_dir.rglob("*")
@@ -871,6 +884,132 @@ def run_skill(skill: dict, question: str, api_key: str, history: list = None) ->
         temperature=skill.get("temperature", 0.7),
         max_tokens=skill.get("max_tokens", 3000),
     )
+
+
+# ── onboarding de proyectos existentes ─────────────────────────────────────────
+
+_SCAN_MANIFESTS = (
+    "README.md", "README", "package.json", "requirements.txt", "pyproject.toml",
+    "go.mod", "Cargo.toml", "pom.xml", "composer.json", "Gemfile",
+)
+
+
+def _gather_scan_context(project_dir: Path, pmap: dict, max_files: int = 10) -> str:
+    """Junta contenido liviano (manifiestos + entry points) para el resumen LLM."""
+    seen = set()
+    blocks = []
+
+    def add(rel: str):
+        if len(blocks) >= max_files or rel in seen:
+            return
+        fp = project_dir / rel
+        if not fp.is_file():
+            return
+        try:
+            text = fp.read_text(encoding="utf-8", errors="ignore")[:1500]
+        except Exception:
+            return
+        seen.add(rel)
+        blocks.append(f"### {rel}\n```\n{text}\n```")
+
+    for manifest in _SCAN_MANIFESTS:
+        add(manifest)
+    for sub in pmap.get("subprojects", []):
+        base = "" if sub["path"] == "." else sub["path"] + "/"
+        for manifest in _SCAN_MANIFESTS:
+            add(base + manifest)
+        for entry in sub.get("entrypoints", []):
+            add(base + entry)
+    return "\n\n".join(blocks)
+
+
+def run_scan(api_key: str, project_dir: Path, model: str = "deepseek-chat",
+             refresh: bool = False, quiet: bool = False) -> dict:
+    """Onboarding: escanea el proyecto, lo resume con PRO y cachea el contexto.
+
+    Si ya existe `.deep/context.json` y no se pide `refresh`, devuelve el cache.
+    """
+    from datetime import datetime
+    from core.project_scanner import scan, format_map
+    from core.client import DeepSeekClient
+    from core.models import MODEL_PRO
+
+    ctx_file = project_dir / ".deep" / "context.json"
+    if ctx_file.exists() and not refresh:
+        try:
+            return json.loads(ctx_file.read_text(encoding="utf-8"))
+        except Exception:
+            pass  # cache ilegible → re-escanear
+
+    pmap = scan(project_dir)
+    if not quiet:
+        print()
+        print(format_map(pmap))
+
+    if pmap["file_count"] == 0:
+        if not quiet:
+            print("\n⚠️  Carpeta vacía o sin código reconocible.")
+        return {}
+
+    snippets = _gather_scan_context(project_dir, pmap)
+    client = DeepSeekClient(api_key, model=model)
+    spinner = Spinner()
+    if not quiet:
+        print("\n🔍 Analizando el proyecto (una vez)…")
+        spinner.start()
+    prompt = (
+        f"Estructura detectada ({pmap['kind']}):\n"
+        f"{format_map(pmap)}\n\n"
+        f"Archivos clave:\n{snippets}\n\n"
+        "Resumí este proyecto existente para alguien que lo va a modificar. "
+        "Sé conciso (máx ~12 líneas) y cubrí: qué hace, cómo está organizado "
+        "(componentes y sus stacks), cómo se ejecuta, y convenciones o restricciones "
+        "que convenga respetar. No inventes: basate solo en lo provisto."
+    )
+    summary = ""
+    try:
+        resp = client.chat(
+            prompt,
+            system_prompt="Sos un arquitecto que documenta proyectos existentes con precisión.",
+            temperature=0.3, max_tokens=1200, model_override=MODEL_PRO,
+        )
+        if resp.get("success"):
+            summary = (resp.get("content") or "").strip()
+    finally:
+        if not quiet:
+            spinner.stop()
+
+    short_desc = summary.split("\n", 1)[0][:200] if summary else (
+        f"{pmap['name']} ({pmap['kind']}, {', '.join(pmap['languages']) or 'sin stack detectado'})"
+    )
+
+    deep_dir = project_dir / ".deep"
+    deep_dir.mkdir(exist_ok=True)
+    ctx = {}
+    if ctx_file.exists():
+        try:
+            ctx = json.loads(ctx_file.read_text(encoding="utf-8"))
+        except Exception:
+            ctx = {}
+    ctx.update({
+        "source": "scan",
+        "task": ctx.get("task") or short_desc,
+        "summary": summary,
+        "project_map": pmap,
+        "model": model,
+        "scanned_at": datetime.now().isoformat(),
+    })
+    ctx_file.write_text(json.dumps(ctx, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    from core.project_scanner import seed_project_doc
+    created_doc = seed_project_doc(project_dir, pmap["name"], summary)
+
+    if summary and not quiet:
+        print("\n" + summary + "\n")
+    if created_doc and not quiet:
+        print("📝 Creé .deep/PROJECT.md — editalo para fijar contexto/reglas "
+              "que el CLI respetará en build y update.\n")
+    return ctx
 
 
 # ── privado ───────────────────────────────────────────────────────────────────

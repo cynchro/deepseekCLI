@@ -4,11 +4,13 @@ from datetime import datetime
 from typing import Dict, List
 
 from core.client import DeepSeekClient
+from core.models import MODEL_FLASH
 
 
 class ReflectiveAgent:
-    def __init__(self, client: DeepSeekClient):
+    def __init__(self, client: DeepSeekClient, model: str = MODEL_FLASH):
         self.client = client
+        self.model = model
         self.reflection_history: List[Dict] = []
         self.personality = {"curiosity": 0.8, "caution": 0.6,
                             "creativity": 0.7, "precision": 0.75}
@@ -31,6 +33,7 @@ class ReflectiveAgent:
             prompt,
             system_prompt="Eres un agente con capacidad de introspección profunda. Sé honesto.",
             temperature=0.7, max_tokens=600,
+            model_override=self.model,
         )
         try:
             reflection = json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))
@@ -62,6 +65,7 @@ class ReflectiveAgent:
             f"METACOGNICIÓN: Analiza cómo estoy aprendiendo.\nExperiencias:\n{summary}\n\nJSON con insights accionables.",
             system_prompt="Eres un experto en metacognición. Responde JSON.",
             temperature=0.5, max_tokens=400,
+            model_override=self.model,
         )
         try:
             return json.loads(re.sub(r"```json\n?|```\n?", "", response["content"]))

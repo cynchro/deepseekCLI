@@ -132,6 +132,18 @@ def _legacy(argv: list):
 
     p_upd.set_defaults(func=do_update)
 
+    # ── scan ─────────────────────────────────────────────────────────────────
+    p_scan = sub.add_parser("scan", help="Analiza un proyecto existente y arma su contexto")
+    p_scan.add_argument("--model", default="deepseek-chat", metavar="MODELO")
+    p_scan.add_argument("-r", "--refresh", action="store_true",
+                        help="Re-escanea aunque ya exista contexto cacheado")
+
+    def do_scan(args):
+        from cli.commands import run_scan
+        run_scan(_require_api_key(), Path.cwd(), model=args.model, refresh=args.refresh)
+
+    p_scan.set_defaults(func=do_scan)
+
     # ── claudejob ──────────────────────────────────────────────────────────────
     p_cj = sub.add_parser(
         "claudejob",
