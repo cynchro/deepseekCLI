@@ -26,6 +26,12 @@ _H2 = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 _H3 = re.compile(r"^###\s+(.+?)\s*$", re.MULTILINE)
 _BULLET = re.compile(r"^\s*[-*]\s+(.+?)\s*$", re.MULTILINE)
 
+# Convención del template: `- archivo <ruta>: <detalle>`.
+_FILE_BULLET = re.compile(r"^archivo\s+(\S+?)\s*:\s*(.*)$", re.IGNORECASE | re.DOTALL)
+# Fallback: cualquier token con pinta de ruta+extensión (la extensión arranca con
+# letra para no confundir versiones tipo "3.0.0").
+_PATH_TOKEN = re.compile(r"[\w./-]+\.[A-Za-z][A-Za-z0-9]{0,7}")
+
 
 def _split_by(pattern: re.Pattern, text: str) -> List[Dict]:
     """Parte el texto en bloques {name, body} según un patrón de heading."""
@@ -98,6 +104,33 @@ def parse_corrections(text: str) -> Dict:
     elif not modules:
         errors.append("`## CORRECTIONS` no tiene módulos (`### <nombre>`). Nada que corregir.")
     return {"modules": modules, "errors": errors}
+
+
+def module_files(module: Dict) -> List[Dict]:
+    """Extrae los archivos que el arquitecto especificó en un módulo del job.md,
+    para construir un plan ESTRUCTURADO sin que DeepSeek vuelva a planificar.
+
+    Convención preferida (la del template): bullets `archivo <ruta>: <detalle>`.
+    Si un bullet no la sigue, se intenta detectar un token con pinta de ruta.
+    Devuelve [{path, description}] sin duplicados; vacío si no hay archivos
+    reconocibles (en ese caso el caller cae al plan de texto sembrado)."""
+    files: List[Dict] = []
+    seen = set()
+    for bullet in _bullets(module.get("body", "")):
+        m = _FILE_BULLET.match(bullet)
+        if m:
+            path, desc = m.group(1), (m.group(2).strip() or bullet)
+        else:
+            tok = _PATH_TOKEN.search(bullet)
+            if not tok:
+                continue
+            path, desc = tok.group(0), bullet
+        path = path.strip().lstrip("/").replace("\\", "/")
+        if not path or path in seen or ".." in path.split("/"):
+            continue
+        seen.add(path)
+        files.append({"path": path, "description": desc})
+    return files
 
 
 # ── Plantilla ────────────────────────────────────────────────────────────────

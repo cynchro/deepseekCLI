@@ -111,16 +111,7 @@ class DeepSeekLearningSystem:
         _dbg.log("SYSTEM", f"workflow=iterative  pro={MODEL_PRO}  flash={MODEL_FLASH}")
 
         self._progress("FASE 1 — plan")
-        # `plan` puede llegar como texto desde un planificador externo (claudejob).
-        # El motor iterativo necesita un plan ESTRUCTURADO (con lista de archivos),
-        # así que el plan externo no reemplaza al planner: lo SEMBRAMOS en él para
-        # que DeepSeek derive los archivos respetando la arquitectura provista.
-        external_plan = plan if isinstance(plan, str) else None
-        if external_plan:
-            _dbg.log("PHASE", "1 — planificación estructurada (sembrada con plan externo)")
-        else:
-            _dbg.log("PHASE", "1 — planificación estructurada")
-        plan = self._plan_structured(task, external_plan=external_plan)
+        plan = self._resolve_plan(task, plan)
         _dbg.log_json("PHASE_1", "plan", plan)
 
         self._progress("FASE 2 — generación por archivo")
@@ -442,6 +433,25 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         if mistakes_block:
             parts.append(mistakes_block)
         return "\n\n".join(parts)
+
+    def _resolve_plan(self, task: str, plan) -> Dict:
+        """Define el plan estructurado de la fase 1 según lo que llega en `plan`:
+
+        - dict  → plan YA estructurado (ej. claudejob lo derivó del job.md): se usa
+          TAL CUAL, sin planificar. DeepSeek solo construye los archivos que definió
+          el arquitecto (honra la regla "no crear archivos fuera de TASKS").
+        - str   → plan de texto externo: NO alcanza para el motor iterativo (necesita
+          lista de archivos), así que SIEMBRA el planner estructurado como guía.
+        - None  → camino normal: DeepSeek planifica desde cero.
+        """
+        if isinstance(plan, dict):
+            _dbg.log("PHASE", "1 — plan estructurado provisto (sin planificar)")
+            return normalize_plan(plan)
+        if isinstance(plan, str) and plan.strip():
+            _dbg.log("PHASE", "1 — planificación estructurada (sembrada con plan externo)")
+            return self._plan_structured(task, external_plan=plan)
+        _dbg.log("PHASE", "1 — planificación estructurada")
+        return self._plan_structured(task)
 
     def _plan_structured(self, task: str, build_state: Optional[BuildState] = None,
                          external_plan: str = None) -> Dict:

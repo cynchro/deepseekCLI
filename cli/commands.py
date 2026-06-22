@@ -462,17 +462,31 @@ def run_claudejob(api_key: str, project_dir: Path, job_file: Optional[str] = Non
     for idx, mod in enumerate(job["modules"], 1):
         print(f"\n── [{idx}/{total}] módulo: {mod['name']} ──")
         task = f"{mod['name']}: {mod['body']}".strip()
-        # Plan inyectado = arquitectura global de Claude + detalle del módulo +
-        # código real ya construido por los módulos previos (para que encaje).
-        # Al pasar plan=..., DeepSeek se saltea su fase 1 (no re-planifica).
+        # Código real ya construido por módulos previos, para que el módulo actual
+        # ENCAJE (rutas/firmas reales) en vez de adivinar contra el PLAN textual.
         built = _built_context(project_dir)
         if built:
             print(f"   📎 contexto: {built.count('### archivo:')} archivo(s) previos")
-        plan = (
+        architecture = (
             f"PLAN GENERAL (definido por el arquitecto):\n{job['plan']}\n\n"
             f"MÓDULO A CONSTRUIR AHORA: {mod['name']}\n{mod['body']}"
             f"{built}"
         )
+        # Si el módulo declara archivos, se arma un plan ESTRUCTURADO directo:
+        # DeepSeek construye EXACTAMENTE esos archivos, sin re-planificar ni inventar
+        # (honra la regla "no crear archivos fuera de TASKS"). Si el módulo no nombra
+        # archivos, se pasa el plan de texto y DeepSeek deriva la lista (fallback).
+        spec_files = cj.module_files(mod)
+        if spec_files:
+            print(f"   🗂️  {len(spec_files)} archivo(s) del job — sin re-planificar")
+            plan = {
+                "architecture": architecture,
+                "files": [{"path": f["path"], "description": f["description"],
+                           "depends_on": []} for f in spec_files],
+            }
+        else:
+            print("   ✏️  módulo sin archivos explícitos — DeepSeek deriva la lista")
+            plan = architecture
         system = _make_system()
         try:
             result = system.execute_and_learn(task, plan=plan)

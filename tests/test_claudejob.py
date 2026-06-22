@@ -145,5 +145,53 @@ class InitForceTests(unittest.TestCase):
             self.assertEqual((job.parent / "job.md.bak").read_text(encoding="utf-8"), "# JOB: viejo\n")
 
 
+class ModuleFilesTests(unittest.TestCase):
+    def test_extracts_archivo_bullets_with_description(self):
+        mod = {"name": "auth", "body": (
+            "- archivo auth/login.py: función login(user) -> Token\n"
+            "- archivo auth/middleware.py: valida el JWT en cada request\n"
+        )}
+        files = cj.module_files(mod)
+        self.assertEqual([f["path"] for f in files], ["auth/login.py", "auth/middleware.py"])
+        self.assertIn("login(user)", files[0]["description"])
+
+    def test_path_token_fallback_without_archivo_prefix(self):
+        mod = {"name": "x", "body": "- el entrypoint vive en src/app.py y arranca todo"}
+        files = cj.module_files(mod)
+        self.assertEqual([f["path"] for f in files], ["src/app.py"])
+
+    def test_ignores_version_like_tokens(self):
+        # "3.0.0" no debe contarse como archivo (extensión arranca con dígito)
+        mod = {"name": "deps", "body": "- usar flask==3.0.0 y mantener compatibilidad"}
+        self.assertEqual(cj.module_files(mod), [])
+
+    def test_empty_when_module_has_no_files(self):
+        # módulo del fixture JOB: bullets en prosa, sin rutas → vacío (cae a fallback)
+        job = cj.parse_job(JOB)
+        auth = next(m for m in job["modules"] if m["name"] == "auth")
+        self.assertEqual(cj.module_files(auth), [])
+
+    def test_dedupes_repeated_paths(self):
+        mod = {"name": "x", "body": "- archivo a/b.py: una cosa\n- archivo a/b.py: otra mención"}
+        self.assertEqual([f["path"] for f in cj.module_files(mod)], ["a/b.py"])
+
+    def test_built_plan_passes_normalize_plan(self):
+        # el dict que arma claudejob a partir de un módulo debe ser un plan válido
+        from core.planner import normalize_plan
+        mod = {"name": "auth", "body": (
+            "- archivo auth/login.py: login\n- archivo auth/jwt.py: tokens\n"
+        )}
+        spec = cj.module_files(mod)
+        plan = {
+            "architecture": "Backend con repository pattern",
+            "files": [{"path": f["path"], "description": f["description"],
+                       "depends_on": []} for f in spec],
+        }
+        norm = normalize_plan(plan)
+        self.assertEqual(sorted(f["path"] for f in norm["files"]),
+                         ["auth/jwt.py", "auth/login.py"])
+        self.assertEqual(len(norm["order"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
