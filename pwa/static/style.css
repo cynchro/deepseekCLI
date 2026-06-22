@@ -170,6 +170,11 @@ header {
   transition: border-color 0.2s;
 }
 .header-actions button:hover { border-color: var(--accent); }
+.header-actions button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
 
 /* ── Messages ─────────────────────────────────────────── */
 

@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Dict, List
 
 import core.debug as _dbg
+from core.models import MODEL_FLASH, estimate_cost
+from core.router import resolve_model
 
 try:
     import requests as _requests
@@ -15,55 +17,91 @@ except ImportError:
 
 
 class DeepSeekClient:
-    def __init__(self, api_key: str = None, model: str = "deepseek-chat"):
+    def __init__(self, api_key: str = None, model: str = MODEL_FLASH):
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
-        self.model = model
+        self.model = resolve_model(model)
         self.max_retries = 3
         self.retry_delay = 1
         self.call_history = []
 
     def chat(self, prompt: str, system_prompt: str = None,
              temperature: float = 0.7, max_tokens: int = 2000,
-             model_override: str = None) -> Dict:
-        model = model_override or self.model
-        _dbg.log("API_CALL", f"model={model}  temp={temperature}  max_tokens={max_tokens}")
+             model_override: str = None, tools: List[Dict] = None,
+             tool_choice=None) -> Dict:
+        """Conveniencia: un turno (system + user) sobre complete()."""
         if system_prompt:
             _dbg.log_block("API_SYS", "system_prompt", system_prompt)
         _dbg.log_block("API_USER", "user_prompt", prompt)
-
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
+        return self.complete(
+            messages, model=model_override or self.model,
+            temperature=temperature, max_tokens=max_tokens,
+            tools=tools, tool_choice=tool_choice,
+        )
+
+    def complete(self, messages: List[Dict], model: str = None,
+                 temperature: float = 0.7, max_tokens: int = 2000,
+                 tools: List[Dict] = None, tool_choice=None) -> Dict:
+        """Chat completion de bajo nivel sobre una lista de mensajes completa.
+
+        Soporta function calling nativo: pasá `tools` (schema OpenAI) y leé
+        `tool_calls` / `finish_reason` del resultado. Mantiene retry + debug.
+        El retorno es un superconjunto del de chat(): se preservan las claves
+        existentes (success, content, tokens, model) y se agregan tool_calls /
+        finish_reason / message.
+        """
+        model = resolve_model(model or self.model)
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = tool_choice if tool_choice is not None else "auto"
+        _dbg.log("API_CALL", f"model={model}  temp={temperature}  "
+                 f"max_tokens={max_tokens}  msgs={len(messages)}  "
+                 f"tools={len(tools) if tools else 0}")
         for attempt in range(self.max_retries):
             t0 = time.time()
             try:
                 response = self._call_api(payload)
                 latency = time.time() - t0
                 usage = response.get("usage", {})
-                msg = response["choices"][0]["message"]
-                content = msg.get("content") or msg.get("reasoning_content", "")
+                choice = response["choices"][0]
+                msg = choice.get("message", {})
+                content = msg.get("content") or msg.get("reasoning_content", "") or ""
+                tool_calls = msg.get("tool_calls")
+                finish_reason = choice.get("finish_reason")
                 _dbg.log("API_OK", f"attempt={attempt+1}  latency={latency:.2f}s  "
+                         f"finish={finish_reason}  "
                          f"tokens_in={usage.get('prompt_tokens','?')}  "
                          f"tokens_out={usage.get('completion_tokens','?')}  "
-                         f"total={usage.get('total_tokens','?')}")
-                _dbg.log_block("API_RESP", "response_content", content)
+                         f"total={usage.get('total_tokens','?')}  "
+                         f"tool_calls={len(tool_calls) if tool_calls else 0}")
+                if content:
+                    _dbg.log_block("API_RESP", "response_content", content)
                 self.call_history.append({
                     "timestamp": datetime.now().isoformat(),
+                    "model": model,
                     "tokens_used": usage.get("total_tokens", 0),
+                    "prompt_tokens": usage.get("prompt_tokens", 0),
+                    "completion_tokens": usage.get("completion_tokens", 0),
+                    "cache_hit_tokens": usage.get("prompt_cache_hit_tokens", 0),
                     "success": True,
                 })
                 return {
                     "success": True,
                     "content": content,
+                    "tool_calls": tool_calls,
+                    "finish_reason": finish_reason,
+                    "message": msg,
                     "tokens": usage,
-                    "model": self.model,
+                    "model": model,
                 }
             except Exception as e:
                 latency = time.time() - t0
@@ -72,10 +110,13 @@ class DeepSeekClient:
                     time.sleep(self.retry_delay * (attempt + 1))
                 else:
                     self.call_history.append({"timestamp": datetime.now().isoformat(),
-                                              "error": str(e), "success": False})
+                                              "model": model, "error": str(e),
+                                              "success": False})
                     return {
                         "success": False,
                         "content": f"Error después de {self.max_retries} intentos: {str(e)[:200]}",
+                        "tool_calls": None,
+                        "finish_reason": "error",
                         "error": str(e),
                     }
 
@@ -153,10 +194,29 @@ class DeepSeekClient:
     def get_stats(self) -> Dict:
         successful = [c for c in self.call_history if c.get("success")]
         total_tokens = sum(c.get("tokens_used", 0) for c in successful)
+        by_model: Dict[str, Dict] = {}
+        total_cost = 0.0
+        total_cache_hit = 0
+        for c in successful:
+            m = c.get("model", "?")
+            ch = c.get("cache_hit_tokens", 0)
+            cost = estimate_cost(m, c.get("prompt_tokens", 0),
+                                 c.get("completion_tokens", 0), ch)
+            total_cost += cost
+            total_cache_hit += ch
+            entry = by_model.setdefault(
+                m, {"calls": 0, "tokens": 0, "cache_hit_tokens": 0, "cost_usd": 0.0})
+            entry["calls"] += 1
+            entry["tokens"] += c.get("tokens_used", 0)
+            entry["cache_hit_tokens"] += ch
+            entry["cost_usd"] = round(entry["cost_usd"] + cost, 6)
         return {
             "total_calls": len(self.call_history),
             "successful_calls": len(successful),
             "failed_calls": len(self.call_history) - len(successful),
             "total_tokens_used": total_tokens,
             "average_tokens_per_call": total_tokens / max(len(successful), 1),
+            "estimated_cost_usd": round(total_cost, 6),
+            "cache_hit_tokens": total_cache_hit,
+            "by_model": by_model,
         }

@@ -25,3 +25,8 @@ no hardcodees credenciales ni API keys en el código
 
 # --- Testing ---
 el código debe ser testeable (inyección de dependencias donde corresponda)
+
+# --- Docker / Node ---
+si usás npm ci en Dockerfile incluí package-lock.json en el mismo cambio
+en Dockerfile copiá cada carpeta con COPY nombre ./nombre, nunca varias carpetas a ./
+no uses version: en docker-compose.yml (Compose v2)

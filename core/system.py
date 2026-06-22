@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import core.debug as _dbg
 from core.build_state import BuildState
 from core.client import DeepSeekClient
+from core.config import get_language_instruction
 from core.context_builder import (
     build_generation_context,
     is_scaffold_file,
@@ -29,6 +30,8 @@ from core.planner import (
     summarize_written_files,
 )
 from core.writer import FileWriter
+from core.prompts import DOCKER_NPM, UPDATE_DOCKER_HINT
+from core.postcheck import analyze_project, apply_remediations, merge_into_heuristics
 
 
 _GEN_SYSTEM = (
@@ -103,13 +106,21 @@ class DeepSeekLearningSystem:
             "a respetar siempre):\n" + doc + "\n"
         )
 
-    def execute_and_learn(self, task: str) -> Dict:
+    def execute_and_learn(self, task: str, plan: str = None) -> Dict:
         _dbg.log("SYSTEM", f"execute_and_learn  task={task[:120]}")
         _dbg.log("SYSTEM", f"workflow=iterative  pro={MODEL_PRO}  flash={MODEL_FLASH}")
 
         self._progress("FASE 1 — plan")
-        _dbg.log("PHASE", "1 — planificación estructurada")
-        plan = self._plan_structured(task)
+        # `plan` puede llegar como texto desde un planificador externo (claudejob).
+        # El motor iterativo necesita un plan ESTRUCTURADO (con lista de archivos),
+        # así que el plan externo no reemplaza al planner: lo SEMBRAMOS en él para
+        # que DeepSeek derive los archivos respetando la arquitectura provista.
+        external_plan = plan if isinstance(plan, str) else None
+        if external_plan:
+            _dbg.log("PHASE", "1 — planificación estructurada (sembrada con plan externo)")
+        else:
+            _dbg.log("PHASE", "1 — planificación estructurada")
+        plan = self._plan_structured(task, external_plan=external_plan)
         _dbg.log_json("PHASE_1", "plan", plan)
 
         self._progress("FASE 2 — generación por archivo")
@@ -126,7 +137,12 @@ class DeepSeekLearningSystem:
             self.file_writer.save_build_state(project_dir, execution["build_state"])
 
         heuristics = self._heuristic_check(written_files, task)
+        heuristics, postcheck_fixes, postcheck_report = self._run_postcheck(
+            heuristics, response_text=execution.get("code", "")
+        )
         _dbg.log_json("PHASE_3", "heuristics", heuristics)
+        if postcheck_fixes:
+            _dbg.log("POSTCHECK", f"fixes={postcheck_fixes}")
 
         self._progress("FASE 4 — revisión final")
         _dbg.log("PHASE", "4 — evaluación global")
@@ -196,6 +212,8 @@ class DeepSeekLearningSystem:
             "patterns": patterns,
             "experience_count": len(self.memory.experiences),
             "tokens_used": execution.get("tokens_used", 0),
+            "postcheck": postcheck_report,
+            "postcheck_fixes": postcheck_fixes,
         }
 
     def review_and_fix(self, task: str, result: Dict) -> Dict:
@@ -230,10 +248,12 @@ Archivos actuales:
 
 Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ext
 """
+        _dbg.log("FIX", f"code_files={len(code_files)}  issues={issues}  suggestions={suggestions}")
+        lang = get_language_instruction()
         self._progress("REVISIÓN")
         response = self._chat(
             prompt,
-            system_prompt="Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders.",
+            system_prompt=f"Eres un senior developer. Corriges código de forma precisa y completa. Sin placeholders. {lang}",
             temperature=0.2, max_tokens=8000,
             model_override=MODEL_FLASH,
         )
@@ -311,6 +331,10 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
                 pass
 
         summary_block = f"Resumen del proyecto:\n{summary}\n\n" if summary else ""
+        lang = get_language_instruction()
+        docker_extra = ""
+        if any(w in change.lower() for w in ("docker", "dockerizar", "dockerize", "container", "compose")):
+            docker_extra = DOCKER_NPM + UPDATE_DOCKER_HINT
         prompt = (
             f"Proyecto actual: {task}\n\n"
             f"{summary_block}"
@@ -320,7 +344,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             f"Archivos relevantes:\n{''.join(file_blocks)}\n\n"
             f"Cambio solicitado: {change}\n"
             f"{self._rules_block()}"
-            f"{self._project_doc_block(project_dir)}\n"
+            f"{self._project_doc_block(project_dir)}"
+            f"{docker_extra}\n"
             "Respetá la estructura, convenciones y stack existentes. "
             "Devolvé SOLO los archivos modificados o nuevos con el formato:\n"
             "### archivo: ruta/archivo.ext\n"
@@ -328,7 +353,10 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         response = self._chat(
             prompt,
-            system_prompt="Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo.",
+            system_prompt=(
+                f"Eres un senior developer. Modificás proyectos existentes con cambios precisos y código completo. "
+                f"{lang}"
+            ),
             temperature=0.3, max_tokens=8000,
             model_override=MODEL_FLASH,
         )
@@ -357,7 +385,16 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             except Exception:
                 pass
 
-        return {"success": True, "files_updated": updated_files}
+        _, postcheck_fixes, postcheck_report = self._run_postcheck(
+            {"heuristic_issues": [], "structural_ok": True, "files_count": len(updated_files)},
+            response_text=response.get("content", ""),
+        )
+        return {
+            "success": True,
+            "files_updated": updated_files,
+            "postcheck": postcheck_report,
+            "postcheck_fixes": postcheck_fixes,
+        }
 
     def _load_project_context(self, project_dir: Path) -> Tuple[Optional[Dict], str]:
         """Lee el mapa y el resumen cacheados por `scan` (.deep/context.json)."""
@@ -406,7 +443,8 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             parts.append(mistakes_block)
         return "\n\n".join(parts)
 
-    def _plan_structured(self, task: str, build_state: Optional[BuildState] = None) -> Dict:
+    def _plan_structured(self, task: str, build_state: Optional[BuildState] = None,
+                         external_plan: str = None) -> Dict:
         similar = self.memory._find_similar(task)
         _dbg.log("PLAN", f"similar_experiences_found={len(similar)}")
         experience_context = ""
@@ -414,6 +452,14 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
             experience_context = "\nExperiencias previas relevantes:\n" + "\n".join(
                 f"- {'Éxito' if e['success'] else 'Fracaso'}: {e['lesson'][:100]}"
                 for e in similar[:3]
+            )
+        if external_plan:
+            # Plan de un planificador externo (claudejob): se inyecta como guía para
+            # que DeepSeek derive de él la lista estructurada de archivos.
+            experience_context += (
+                "\nPLAN BASE provisto por un planificador externo — respetalo como guía "
+                "de arquitectura y alcance, y derivá de él los archivos a generar:\n"
+                + external_plan + "\n"
             )
         prompt = build_plan_prompt(task, self._rules_block(), experience_context)
         if self.file_writer.root_is_output_dir:
@@ -730,7 +776,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         response = self._chat(
             prompt,
-            system_prompt=_GEN_SYSTEM,
+            system_prompt=f"{_GEN_SYSTEM} {get_language_instruction()}",
             temperature=0.2,
             max_tokens=8192,
             model_override=MODEL_FLASH,
@@ -755,7 +801,7 @@ Reescribe SOLO los archivos con problemas. Formato: ### archivo: ruta/archivo.ex
         )
         response = self._chat(
             prompt,
-            system_prompt=_GEN_SYSTEM,
+            system_prompt=f"{_GEN_SYSTEM} {get_language_instruction()}",
             temperature=0.25,
             max_tokens=8192,
             model_override=MODEL_FLASH,
@@ -837,7 +883,7 @@ Salida: solo el código corregido completo del archivo, sin explicaciones.""",
         )
         response = self._chat(
             prompt,
-            system_prompt=_PATCH_SYSTEM,
+            system_prompt=f"{_PATCH_SYSTEM} {get_language_instruction()}",
             temperature=0.2,
             max_tokens=8192,
             model_override=MODEL_FLASH,
@@ -931,6 +977,20 @@ JSON:
             if len(lines) >= 2:
                 return "\n".join(lines[1:-1]).rstrip()
         return text
+
+    def _run_postcheck(self, heuristics: Dict, response_text: str = "") -> Tuple[Dict, List[str], Dict]:
+        project_dir = self.file_writer.last_project_dir
+        if not project_dir and self.file_writer.root_is_output_dir:
+            project_dir = self.file_writer.output_base_dir
+        if not project_dir:
+            return heuristics, [], {"issues": [], "warnings": [], "ok": True}
+
+        self._progress("VALIDANDO")
+        report = analyze_project(Path(project_dir), response_text or None)
+        fixes = apply_remediations(Path(project_dir), report)
+        if fixes:
+            report = analyze_project(Path(project_dir), response_text or None)
+        return merge_into_heuristics(heuristics, report), fixes, report
 
     def _heuristic_check(self, written_files: List[str], task: str) -> Dict:
         issues = []

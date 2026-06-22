@@ -67,6 +67,9 @@ class FileWriter:
         _dbg.log("WRITER", f"project_dir={project_dir}  response_chars={len(content)}")
         written = []
 
+        if content.strip() and not self._response_looks_complete(content):
+            _dbg.log("WRITER", "warning: response may be truncated (unclosed code fence)")
+
         named = self._extract_named_blocks(content)
         _dbg.log("WRITER", f"named_blocks={len(named)}")
         if named:
@@ -130,19 +133,72 @@ class FileWriter:
         key = [w for w in words if w not in _STOP and len(w) > 2][:4]
         return "_".join(key) if key else "proyecto"
 
-    def _extract_named_blocks(self, content: str) -> List[Tuple[str, str]]:
-        results = []
-        for m in re.compile(r"```[\w]*:([^\n]+)\n(.*?)```", re.DOTALL).finditer(content):
-            results.append((m.group(1).strip(), m.group(2).rstrip()))
+    @staticmethod
+    def _response_looks_complete(text: str) -> bool:
+        stripped = text.rstrip()
+        if not stripped:
+            return True
+        return stripped.count("```") % 2 == 0
+
+    # Encabezado de archivo: "### archivo: ruta", "## file: a/b.js", "**fichero: x.py**".
+    # Requiere la palabra clave (archivo/file/fichero) para no confundir con encabezados
+    # de sección markdown (## Instalación, ## Uso) que aparecen dentro del contenido.
+    _FILE_HEADER_RE = re.compile(
+        r"^[ \t]{0,3}(?:#{1,6}\s*|\*\*\s*|`)?"
+        r"(?:archivo|fichero|file)\s*:?\s+"
+        r"`?([^\s`*<>]+)`?\s*\*{0,2}`?[ \t]*$",
+        re.IGNORECASE | re.MULTILINE,
+    )
+
+    @staticmethod
+    def _strip_outer_fence(body: str) -> str:
+        """Si el cuerpo está envuelto en un único bloque ```...```, lo quita.
+        No toca fences internos (ej. ejemplos dentro de un README)."""
+        lines = body.split("\n")
+        start = 0
+        while start < len(lines) and not lines[start].strip():
+            start += 1
+        if start < len(lines) and lines[start].lstrip().startswith("```"):
+            end = len(lines) - 1
+            while end > start and not lines[end].strip():
+                end -= 1
+            if end > start and lines[end].strip().startswith("```"):
+                return "\n".join(lines[start + 1:end])
+        return body
+
+    @staticmethod
+    def _extract_header_blocks(content: str) -> List[Tuple[str, str]]:
+        """Formato dominante del modelo: '### archivo: ruta' + código (con o sin fences),
+        hasta el próximo encabezado de archivo o el fin del texto."""
+        matches = list(FileWriter._FILE_HEADER_RE.finditer(content))
+        blocks: List[Tuple[str, str]] = []
+        for i, m in enumerate(matches):
+            filename = m.group(1).strip().strip("`")
+            start = m.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            body = FileWriter._strip_outer_fence(content[start:end]).strip("\n")
+            if filename and body.strip():
+                blocks.append((filename, body))
+        return blocks
+
+    @staticmethod
+    def _extract_named_blocks(content: str) -> List[Tuple[str, str]]:
+        # 1) Bloques delimitados por encabezados "### archivo: ruta" (formato dominante).
+        blocks = FileWriter._extract_header_blocks(content)
+        if blocks:
+            return blocks
+        # 2) Fence con nombre embebido: ```lang:ruta
+        results = [(m.group(1).strip(), m.group(2).rstrip())
+                   for m in re.finditer(r"```[\w]*:([^\n]+)\n(.*?)```", content, re.DOTALL)]
         if results:
             return results
-        for m in re.compile(
-            r"(?:#{1,4}\s*(?:archivo|file|fichero)?:?\s*|\*\*|`)"
-            r"([\w./\-]+(?:\.\w+)?)(?:\*\*|`)?\s*\n+```(?:\w+)?\n(.*?)```",
-            re.DOTALL | re.IGNORECASE,
-        ).finditer(content):
-            results.append((m.group(1).strip(), m.group(2).rstrip()))
-        return results
+        # 3) Encabezado/negrita/code seguido de un fence inmediato (heurística previa).
+        #    Exige extensión (nombre.ext) para no tomar títulos de sección como archivos.
+        return [(m.group(1).strip(), m.group(2).rstrip())
+                for m in re.finditer(
+                    r"(?:#{1,4}\s*(?:archivo|file|fichero)?:?\s*|\*\*|`)"
+                    r"([\w./\-]+\.\w+)(?:\*\*|`)?\s*\n+```(?:\w+)?\n(.*?)```",
+                    content, re.DOTALL | re.IGNORECASE)]
 
     def _extract_anonymous_blocks(self, content: str) -> List[Tuple[str, str]]:
         return [

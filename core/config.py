@@ -7,6 +7,24 @@ from pathlib import Path
 
 _CONFIG_FILE = Path.home() / ".config" / "deep" / "config.json"
 
+_LANGUAGES = {
+    "1": ("es", "Español"),
+    "2": ("en", "English"),
+    "3": ("pt", "Português"),
+    "4": ("zh", "中文"),
+    "5": ("fr", "Français"),
+    "6": ("de", "Deutsch"),
+}
+
+_LANG_INSTRUCTIONS = {
+    "es": "Responde siempre en español.",
+    "en": "Always respond in English.",
+    "pt": "Responda sempre em português.",
+    "zh": "请始终用中文回复。",
+    "fr": "Réponds toujours en français.",
+    "de": "Antworte immer auf Deutsch.",
+}
+
 
 def load_api_key() -> str | None:
     try:
@@ -25,6 +43,52 @@ def save_api_key(key: str) -> None:
     existing["api_key"] = key
     _CONFIG_FILE.write_text(json.dumps(existing, indent=2))
     _CONFIG_FILE.chmod(0o600)
+
+
+def load_language() -> str | None:
+    """Returns stored language code, or None if never configured."""
+    try:
+        return json.loads(_CONFIG_FILE.read_text()).get("language") or None
+    except Exception:
+        return None
+
+
+def save_language(lang: str) -> None:
+    _CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    try:
+        existing = json.loads(_CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    existing["language"] = lang
+    _CONFIG_FILE.write_text(json.dumps(existing, indent=2))
+
+
+def get_language_instruction() -> str:
+    """Returns a sentence to inject in system prompts enforcing the saved language."""
+    lang = load_language() or "es"
+    return _LANG_INSTRUCTIONS.get(lang, _LANG_INSTRUCTIONS["es"])
+
+
+def prompt_and_save_language() -> str:
+    """Interactive language picker. Returns the chosen language code."""
+    from core.i18n import t
+    print(t("lang.picker.title"))
+    for key, (code, name) in _LANGUAGES.items():
+        print(f"   {key}. {name}")
+    print()
+    while True:
+        try:
+            choice = input(t("lang.picker.option")).strip() or "1"
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "es"
+        if choice in _LANGUAGES:
+            lang, name = _LANGUAGES[choice]
+            save_language(lang)
+            print(t("lang.saved", name=name))
+            return lang
+        print(t("lang.picker.invalid"))
 
 
 def _add_to_shell(key: str) -> None:
@@ -121,11 +185,15 @@ def prompt_and_save() -> str:
 
 
 def show_config() -> None:
+    from core.i18n import t
     key = load_api_key()
     if key:
         masked = key[:8] + "..." + key[-4:] if len(key) > 12 else "***"
-        print(f"  API key : {masked}")
-        print(f"  Archivo : {_CONFIG_FILE}")
+        print(t("config.api_key", masked=masked))
+        print(t("config.file", path=_CONFIG_FILE))
     else:
-        print("  No hay API key guardada.")
-        print(f"  Usá 'deep config set-key' para guardar una.")
+        print(t("config.nokey"))
+        print(t("config.nokey.hint"))
+    lang = load_language()
+    lang_name = next((n for _, (c, n) in _LANGUAGES.items() if c == lang), lang or "Español")
+    print(t("config.lang", name=lang_name, code=lang or "es"))
