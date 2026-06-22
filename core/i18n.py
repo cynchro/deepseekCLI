@@ -240,13 +240,9 @@ _STRINGS = {
         "es": "  Comando desconocido: {cmd}. Probá /help",
         "en": "  Unknown command: {cmd}. Try /help",
     },
-    "onboard.detected": {
-        "es": "\n  🆕 Proyecto existente sin contexto previo — analizándolo una vez…",
-        "en": "\n  🆕 Existing project without prior context — analyzing it once…",
-    },
-    "onboard.failed": {
-        "es": "  ⚠️  No se pudo analizar el proyecto: {err}",
-        "en": "  ⚠️  Could not analyze the project: {err}",
+    "onboard.hint": {
+        "es": "\n  🆕 Proyecto detectado sin contexto. Corré /scan para analizarlo.",
+        "en": "\n  🆕 Project detected without context. Run /scan to analyze it.",
     },
     "agent.mode.current": {
         "es": "  Modo actual: {b}{mode}{r} — {desc}",

@@ -245,9 +245,9 @@ def _finalize_session(repl: "_Repl") -> None:
 
 def _auto_onboard(repl: "_Repl") -> None:
     """Si la carpeta actual es un proyecto existente sin contexto cacheado, lo
-    analiza una vez (igual que `/scan`) para que el agente arranque con contexto.
-    No corre si ya hay `.deep/context.json` ni si no parece un proyecto reconocible.
-    Nunca rompe el arranque: cualquier error se traga."""
+    DETECTA (barato, solo filesystem) y sugiere `/scan`. NO dispara la llamada
+    LLM en el arranque: el análisis caro corre solo si el usuario tipea `/scan`.
+    No avisa si ya hay `.deep/context.json` ni si no parece un proyecto."""
     if (repl.cwd / ".deep" / "context.json").exists():
         return  # ya onboardeado o generado por deep
     try:
@@ -256,12 +256,8 @@ def _auto_onboard(repl: "_Repl") -> None:
     except Exception:
         return
     if not pmap.get("subprojects"):
-        return  # no parece un proyecto reconocible → no gastar una llamada
-    print(t("onboard.detected"))
-    try:
-        run_scan(repl.api_key, repl.cwd)
-    except Exception as e:
-        print(t("onboard.failed", err=e))
+        return  # no parece un proyecto reconocible → ni el hint
+    print(t("onboard.hint"))
 
 
 def _recap_banner(repl: "_Repl") -> None:
