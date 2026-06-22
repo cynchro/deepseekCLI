@@ -7,6 +7,39 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-22
+
+Planner adaptativo + conciencia de proyectos existentes (PR #5), con refinamientos.
+
+### Added
+- **Planner adaptativo iterativo por archivo**: el build pasó de un solo tiro a
+  `plan estructurado → generación por archivo → re-plan → revisión/parche → revisión
+  final`, con memoria intra-build (`core/planner.py`, `core/build_state.py`,
+  `core/context_builder.py`).
+- **Onboarding de proyectos existentes**: comando `scan` que analiza el proyecto y
+  cachea su contexto (`core/project_scanner.py`); `.deep/PROJECT.md` editable que el
+  CLI respeta en build y update.
+- **`scan` + auto-onboarding en el REPL agente-first** (`/scan`). El onboarding es
+  **opt-in**: al entrar a un proyecto sin contexto lo detecta y sugiere `/scan`, sin
+  disparar la llamada LLM en el arranque (sin costo ni demora sorpresa).
+
+### Changed
+- **claudejob usa el plan de Claude como plan estructurado directo**: DeepSeek
+  construye exactamente los archivos declarados en `TASKS` sin re-planificar ni
+  inventar (honra la regla "no crear archivos fuera de TASKS"). Si un módulo no
+  nombra archivos, cae al plan de texto sembrado.
+
+### Fixed
+- Resiliencia en el build paralelo y consistencia de `_api_lock`.
+- El evaluador final ya no penaliza requisitos fuera del alcance pedido.
+
+## [0.8.1] - 2026-06-21
+
+### Fixed
+- **RAG**: se saltea `vendor/` al indexar (proyectos PHP/Composer) y se calculan los
+  embeddings por lotes, acotando el pico de RAM; persistencia incremental de vectores
+  para no recalcular todo ante una interrupción.
+
 ## [0.8.0] - 2026-06-19
 
 Consola bilingüe (español / inglés): apertura a uso internacional.
@@ -225,7 +258,9 @@ modelos DeepSeek **PRO (decide) / FLASH (construye)**.
 - Primera versión open source: pipeline de generación, heurísticas de evaluación
   y validación del proyecto generado.
 
-[Unreleased]: https://github.com/cynchro/deepseekCLI/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cynchro/deepseekCLI/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/cynchro/deepseekCLI/compare/v0.8.1...v0.9.0
+[0.8.1]: https://github.com/cynchro/deepseekCLI/compare/v0.8.0...v0.8.1
 [0.3.0]: https://github.com/cynchro/deepseekCLI/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cynchro/deepseekCLI/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/cynchro/deepseekCLI/compare/v0.1.1...v0.1.3
