@@ -30,7 +30,7 @@ from core.tasks import load_tasks, has_open
 from core.i18n import t, mode_help
 from cli.agent_runner import make_agent, run_turn, MODES, _C
 from cli.commands import (run_balance, run_history, run_doctor, run_show,
-                          run_serve, run_upgrade)
+                          run_serve, run_upgrade, run_scan)
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -57,11 +57,11 @@ def _banner() -> str:
         f"  {t('agent.banner.subtitle')}\n"
         f"  v{_version()}{_C['reset']}\n"
         f"  {t('agent.banner.tagline')}\n"
-        f"  {t('agent.banner.commands')} {_C['dim']}/help /init /mode /model /lang /skills /cost /clear /exit{_C['reset']}\n"
+        f"  {t('agent.banner.commands')} {_C['dim']}/help /init /scan /mode /model /lang /skills /cost /clear /exit{_C['reset']}\n"
     )
 
 
-_SLASH = ["/help", "/init", "/tasks", "/recap", "/mode", "/model", "/lang", "/skills", "/skill",
+_SLASH = ["/help", "/init", "/scan", "/tasks", "/recap", "/mode", "/model", "/lang", "/skills", "/skill",
           "/rules", "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
           "/serve", "/upgrade", "/exit", "/quit"]
 
@@ -94,6 +94,9 @@ class _Repl:
             print(_help())
         elif cmd == "/init":
             run_turn(self._get_agent(), INIT_TASK)
+        elif cmd == "/scan":
+            run_scan(self.api_key, self.cwd,
+                     refresh=("-r" in args or "--refresh" in args))
         elif cmd == "/tasks":
             from core.tasks import render
             print("  " + render(load_tasks(self.cwd)).replace("\n", "\n  "))
@@ -240,6 +243,27 @@ def _finalize_session(repl: "_Repl") -> None:
         pass
 
 
+def _auto_onboard(repl: "_Repl") -> None:
+    """Si la carpeta actual es un proyecto existente sin contexto cacheado, lo
+    analiza una vez (igual que `/scan`) para que el agente arranque con contexto.
+    No corre si ya hay `.deep/context.json` ni si no parece un proyecto reconocible.
+    Nunca rompe el arranque: cualquier error se traga."""
+    if (repl.cwd / ".deep" / "context.json").exists():
+        return  # ya onboardeado o generado por deep
+    try:
+        from core.project_scanner import scan
+        pmap = scan(repl.cwd)
+    except Exception:
+        return
+    if not pmap.get("subprojects"):
+        return  # no parece un proyecto reconocible → no gastar una llamada
+    print(t("onboard.detected"))
+    try:
+        run_scan(repl.api_key, repl.cwd)
+    except Exception as e:
+        print(t("onboard.failed", err=e))
+
+
 def _recap_banner(repl: "_Repl") -> None:
     """Al abrir, muestra la última entrada de la bitácora + tareas abiertas."""
     recap = _journal.load_recap(repl.cwd)
@@ -284,6 +308,7 @@ def run(api_key: str, update_notice: str = None):
         print(update_notice)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     repl = _Repl(api_key)
+    _auto_onboard(repl)
     _recap_banner(repl)
 
     if _HAS_PT:

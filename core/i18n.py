@@ -202,6 +202,7 @@ _STRINGS = {
 
   {b}Slash commands{r}
     /init            Explora el proyecto y escribe/actualiza DEEP.md
+    /scan            Analiza un proyecto existente y cachea su contexto (-r refresca)
     /tasks           Muestra el plan de tareas persistente (.deep/tasks.json)
     /mode [m]        Permisos: {modes}  (sin arg muestra el actual)
     /model [pro|flash]  Modelo orquestador del loop (default: pro)
@@ -220,6 +221,7 @@ _STRINGS = {
 
   {b}Slash commands{r}
     /init            Explore the project and write/update DEEP.md
+    /scan            Analyze an existing project and cache its context (-r refreshes)
     /tasks           Show the persistent task plan (.deep/tasks.json)
     /mode [m]        Permissions: {modes}  (no arg shows the current one)
     /model [pro|flash]  Loop orchestrator model (default: pro)
@@ -237,6 +239,14 @@ _STRINGS = {
     "agent.unknown.command": {
         "es": "  Comando desconocido: {cmd}. Probá /help",
         "en": "  Unknown command: {cmd}. Try /help",
+    },
+    "onboard.detected": {
+        "es": "\n  🆕 Proyecto existente sin contexto previo — analizándolo una vez…",
+        "en": "\n  🆕 Existing project without prior context — analyzing it once…",
+    },
+    "onboard.failed": {
+        "es": "  ⚠️  No se pudo analizar el proyecto: {err}",
+        "en": "  ⚠️  Could not analyze the project: {err}",
     },
     "agent.mode.current": {
         "es": "  Modo actual: {b}{mode}{r} — {desc}",
