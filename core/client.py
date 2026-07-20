@@ -16,6 +16,13 @@ except ImportError:
     _HAS_REQUESTS = False
 
 
+class APIStatusError(RuntimeError):
+    """Error HTTP de la API con el status code adjunto, para decidir si reintentar."""
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class DeepSeekClient:
     def __init__(self, api_key: str = None, model: str = MODEL_FLASH):
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
@@ -103,6 +110,28 @@ class DeepSeekClient:
                     "tokens": usage,
                     "model": model,
                 }
+            except APIStatusError as e:
+                latency = time.time() - t0
+                _dbg.log("API_ERR", f"attempt={attempt+1}  latency={latency:.2f}s  "
+                         f"status={e.status_code}  error={e}")
+                # 429 y 5xx son transitorios (rate limit, server hiccup): vale la pena
+                # reintentar. El resto de los 4xx (401 key inválida, 400 payload mal
+                # formado, 402 sin saldo, etc.) son errores garantizados: reintentar
+                # solo agrega latencia y quema requests sin cambiar el resultado.
+                retryable = e.status_code == 429 or e.status_code >= 500
+                if retryable and attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                    continue
+                self.call_history.append({"timestamp": datetime.now().isoformat(),
+                                          "model": model, "error": str(e),
+                                          "success": False})
+                return {
+                    "success": False,
+                    "content": f"Error de la API: {str(e)[:200]}",
+                    "tool_calls": None,
+                    "finish_reason": "error",
+                    "error": str(e),
+                }
             except Exception as e:
                 latency = time.time() - t0
                 _dbg.log("API_ERR", f"attempt={attempt+1}  latency={latency:.2f}s  error={e}")
@@ -129,10 +158,13 @@ class DeepSeekClient:
                 json=payload,
                 timeout=(10, 120),
             )
-            r.raise_for_status()
+            if r.status_code >= 400:
+                # La API manda el motivo real (modelo, contexto, historial mal
+                # formado, etc.) en el body; raise_for_status() lo descartaba.
+                raise APIStatusError(r.status_code, f"HTTP {r.status_code}: {r.text[:500]}")
             return r.json()
         result = subprocess.run(
-            ["curl", "-s", "--max-time", "120", "-X", "POST",
+            ["curl", "-s", "-w", "\n%{http_code}", "--max-time", "120", "-X", "POST",
              "https://api.deepseek.com/v1/chat/completions",
              "-H", f"Authorization: Bearer {self.api_key}",
              "-H", "Content-Type: application/json",
@@ -142,7 +174,16 @@ class DeepSeekClient:
         )
         if result.returncode != 0:
             raise RuntimeError(f"curl falló: {result.stderr[:200]}")
-        return json.loads(result.stdout)
+        body, _, status_str = result.stdout.rpartition("\n")
+        try:
+            status_code = int(status_str)
+        except ValueError:
+            body, status_code = result.stdout, 200
+        data = json.loads(body)
+        if status_code >= 400:
+            err = data.get("error") if isinstance(data, dict) else data
+            raise APIStatusError(status_code, f"HTTP {status_code}: {json.dumps(err)[:500]}")
+        return data
 
     def chat_with_context(self, messages: List[Dict], **kwargs) -> Dict:
         try:

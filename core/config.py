@@ -178,8 +178,18 @@ def prompt_and_save() -> str:
     if not key.startswith("sk-"):
         print("   ⚠️  La key no empieza con 'sk-'. Guardando igual, pero verificá que sea correcta.")
     save_api_key(key)
-    print(f"   ✅ Guardada en {_CONFIG_FILE}")
-    _add_to_shell(key)
+    print(f"   ✅ Guardada en {_CONFIG_FILE} (permisos 600)")
+    print()
+    print("   deep ya la lee de ahí en cada arranque: no hace falta nada más.")
+    print("   También podés exportarla en tu shell (~/.bashrc o ~/.zshrc) por si la")
+    print("   necesitás en otros scripts, pero esto la deja en texto plano en un archivo")
+    print("   que muchas veces se sincroniza a un repo de dotfiles.")
+    try:
+        answer = input("   ¿Exportarla también en el shell? [y/N]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+    if answer in ("y", "yes", "s", "si", "sí"):
+        _add_to_shell(key)
     print()
     return key
 

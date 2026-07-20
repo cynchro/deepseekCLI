@@ -413,12 +413,31 @@ class AgentLoop:
                         "steps": step + 1, "stats": self.client.get_stats()}
 
             tool_calls = resp.get("tool_calls")
+            # Si el modelo cortó por límite de tokens emitiendo tool_calls, el batch
+            # viene truncado (arguments JSON incompletos). Adjuntar ese assistant con
+            # tool_calls deja un grupo sin sus mensajes 'tool' → la API rechaza con 400
+            # ("must be followed by tool messages") en la PRÓXIMA llamada. Lo descartamos
+            # y reintentamos el turno en vez de persistir un historial inválido.
+            truncated = resp.get("finish_reason") == "length"
+            if tool_calls and truncated:
+                self.messages.append({"role": "assistant",
+                                      "content": resp.get("content") or ""})
+                self.messages.append({"role": "user", "content": (
+                    "Tu respuesta anterior se cortó por límite de tokens con tool_calls "
+                    "incompletos. Reintentá ese paso emitiendo menos llamadas a la vez "
+                    "(idealmente una sola) y argumentos más chicos.")})
+                self.on_event("truncated", {"finish_reason": "length"})
+                continue
+
             assistant = {"role": "assistant", "content": resp.get("content") or ""}
             if tool_calls:
                 assistant["tool_calls"] = tool_calls
             self.messages.append(assistant)
 
-            if resp.get("finish_reason") == "tool_calls" and tool_calls:
+            # Ejecutar SIEMPRE que haya tool_calls (no gatear por finish_reason): todo
+            # assistant con tool_calls debe recibir sus respuestas 'tool' o el historial
+            # queda mal formado.
+            if tool_calls:
                 # Parseo de todas las llamadas del batch.
                 parsed = []
                 for tc in tool_calls:
