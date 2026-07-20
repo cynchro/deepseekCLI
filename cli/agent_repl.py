@@ -31,6 +31,7 @@ from core.i18n import t, mode_help
 from cli.agent_runner import make_agent, run_turn, MODES, _C
 from cli.commands import (run_balance, run_history, run_doctor, run_show,
                           run_serve, run_upgrade, run_scan)
+from cli.term_title import set_title, IDLE_TITLE
 
 _HISTORY_FILE = Path.home() / ".config" / "deep" / "history"
 
@@ -302,6 +303,7 @@ def run(api_key: str, update_notice: str = None):
     print(_banner())
     if update_notice:
         print(update_notice)
+    set_title(IDLE_TITLE)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
     repl = _Repl(api_key)
     _auto_onboard(repl)

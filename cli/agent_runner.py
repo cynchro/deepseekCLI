@@ -5,6 +5,7 @@ from pathlib import Path
 from core.client import DeepSeekClient
 from core.agent_loop import AgentLoop
 from core.context import load_project_context
+from cli.term_title import TitleAnimator
 
 MODES = ("ask", "auto", "plan", "yolo")
 _MODE_HELP = {
@@ -35,7 +36,9 @@ def _fmt_args(name: str, args: dict) -> str:
 
 
 def _printer(kind: str, data: dict):
-    if kind == "tool_call":
+    if kind == "thinking":
+        print(f"\n{_C['dim']}{data['text']}{_C['reset']}")
+    elif kind == "tool_call":
         print(f"  {_C['cyan']}⚙ {data['name']}{_C['reset']} "
               f"{_C['dim']}{_fmt_args(data['name'], data['args'])}{_C['reset']}")
     elif kind == "build":
@@ -150,7 +153,12 @@ def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
 
 
 def run_turn(loop: AgentLoop, task: str) -> dict:
-    result = loop.run(task)
+    title = TitleAnimator()
+    title.start()
+    try:
+        result = loop.run(task)
+    finally:
+        title.stop()
     if result.get("success"):
         content = (result.get("content") or "").strip()
         if content:

@@ -40,6 +40,13 @@ una pregunta sobre este proyecto y vos la respondés explorando el workspace.
 DEFAULT_SYSTEM = """Sos deep, un agente de programación senior que trabaja en una terminal.
 Resolvés la tarea del usuario operando sobre el workspace con herramientas.
 
+# Antes de actuar
+En tu primera respuesta de cada turno (junto con tu primera tool call), escribí UNA línea
+breve de contexto: qué entendiste del pedido y qué vas a hacer. Si el usuario pegó un log,
+stack trace o salida de un comando (p.ej. un build que falló), esa línea tiene que nombrar
+el error real que identificaste ahí adentro (no "voy a revisar el log": decí CUÁL es el
+error). Esto no es pedir permiso — es una frase de contexto y seguís directo a actuar.
+
 # Cómo escribís código
 VOS escribís el código. Sos el modelo más capaz del sistema: no delegues la parte
 que importa.
@@ -432,6 +439,11 @@ class AgentLoop:
             assistant = {"role": "assistant", "content": resp.get("content") or ""}
             if tool_calls:
                 assistant["tool_calls"] = tool_calls
+                # Texto que el modelo manda junto con las tool_calls (p.ej. "detecté X,
+                # voy a hacer Y"): sin esto se pierde y el usuario solo ve las tool
+                # calls ejecutarse sin ningún contexto previo.
+                if assistant["content"].strip():
+                    self.on_event("thinking", {"text": assistant["content"].strip()})
             self.messages.append(assistant)
 
             # Ejecutar SIEMPRE que haya tool_calls (no gatear por finish_reason): todo
