@@ -20,6 +20,8 @@ class ToolContext:
     # Archivos que el agente ya conoce (leyó o escribió) en este run. Sirve para el
     # guard read-before-edit: editar a ciegas un archivo no visto es fuente de errores.
     known_files: Set[str] = field(default_factory=set)
+    # Sesión de navegador (core.tools.browser._Session), lazy — None hasta el primer uso.
+    browser: object = None
 
 
 def make_diff(old: str, new: str, path: str, max_lines: int = _DIFF_MAX_LINES) -> str:
