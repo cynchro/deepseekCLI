@@ -1,6 +1,8 @@
 import os
 import subprocess
 import json
+import sys
+import threading
 import time
 from datetime import datetime
 from typing import Dict, List
@@ -14,6 +16,33 @@ try:
     _HAS_REQUESTS = True
 except ImportError:
     _HAS_REQUESTS = False
+
+_HEARTBEAT_DELAY = 8  # recién a partir de acá se avisa; llamadas normales no lo disparan
+
+
+def _run_with_heartbeat(call):
+    """Corre `call` (sin args) mostrando un contador de segundos si tarda más de
+    _HEARTBEAT_DELAY, para poder distinguir 'sigue esperando' de 'se colgó'."""
+    done = threading.Event()
+    t0 = time.time()
+
+    def _tick():
+        while not done.wait(1):
+            elapsed = time.time() - t0
+            if elapsed >= _HEARTBEAT_DELAY:
+                sys.stdout.write(f"\r  ⏳ esperando respuesta... {int(elapsed)}s")
+                sys.stdout.flush()
+
+    th = threading.Thread(target=_tick, daemon=True)
+    th.start()
+    try:
+        return call()
+    finally:
+        done.set()
+        th.join(timeout=1)
+        if time.time() - t0 >= _HEARTBEAT_DELAY:
+            sys.stdout.write("\r" + " " * 40 + "\r")
+            sys.stdout.flush()
 
 
 class APIStatusError(RuntimeError):
@@ -76,7 +105,7 @@ class DeepSeekClient:
         for attempt in range(self.max_retries):
             t0 = time.time()
             try:
-                response = self._call_api(payload)
+                response = _run_with_heartbeat(lambda: self._call_api(payload))
                 latency = time.time() - t0
                 usage = response.get("usage", {})
                 choice = response["choices"][0]
@@ -120,6 +149,8 @@ class DeepSeekClient:
                 # solo agrega latencia y quema requests sin cambiar el resultado.
                 retryable = e.status_code == 429 or e.status_code >= 500
                 if retryable and attempt < self.max_retries - 1:
+                    motivo = "límite de rate (429)" if e.status_code == 429 else f"error del servidor (HTTP {e.status_code})"
+                    print(f"\n⚠️  {motivo}, reintentando (intento {attempt + 2}/{self.max_retries})...")
                     time.sleep(self.retry_delay * (attempt + 1))
                     continue
                 self.call_history.append({"timestamp": datetime.now().isoformat(),
@@ -136,6 +167,8 @@ class DeepSeekClient:
                 latency = time.time() - t0
                 _dbg.log("API_ERR", f"attempt={attempt+1}  latency={latency:.2f}s  error={e}")
                 if attempt < self.max_retries - 1:
+                    print(f"\n⚠️  Problema de conexión ({e.__class__.__name__}), "
+                          f"reintentando (intento {attempt + 2}/{self.max_retries})...")
                     time.sleep(self.retry_delay * (attempt + 1))
                 else:
                     self.call_history.append({"timestamp": datetime.now().isoformat(),
