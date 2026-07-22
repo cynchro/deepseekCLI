@@ -7,6 +7,69 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### Added
+- **`uninstall.sh` / `uninstall.ps1`**: desinstalan lo que crean `install.sh`/`install.ps1`
+  (el venv aislado en `~/.local/share/deepseekcli` y el comando `deep`). En Windows
+  también sacan esa ruta del PATH de usuario (que `install.ps1` agrega directo a la
+  variable de entorno); en Linux/macOS no se toca `~/.bashrc`/`~/.zshrc` a mano —
+  `~/.local/bin` lo comparten otras herramientas, no es seguro editarlo a ciegas.
+  Flag `--purge`/`-Purge` para además borrar `~/.config/deep` (API key, idioma,
+  historial); sin ese flag se conserva por si reinstalás después.
+- **Workspace remoto vía SSH** (`deep agent --host usuario@servidor -w /ruta/absoluta`):
+  el agente puede leer, editar y ejecutar comandos en otra máquina sin instalar `deep`
+  ahí, solo con `sshd` corriendo. Auth únicamente por clave/ssh-agent (reusa
+  `~/.ssh/config`/`known_hosts`, sin passwords). Nuevo `core/ssh_workspace.py`
+  (`SSHConnection` + `SSHPath`, que implementa la misma interfaz que `pathlib.Path`
+  usada por el resto del motor). Extra opcional `pip install "deepseek-builder[ssh]"`
+  (`paramiko`). Alcance: solo `deep agent`, solo remotos POSIX.
+- **Picker interactivo de carpeta remota**: `--host` sin `-w` abre un navegador de
+  directorios por texto (arranca en el home remoto; número entra, `..` sube, ruta
+  absoluta salta directo, Enter confirma) en vez de exigir de antemano la ruta
+  absoluta del proyecto.
+- **`deep remote --host usuario@servidor`**: REPL interactivo sobre un workspace
+  remoto — mismo loop y `/comandos` que `deep` local (salvo `/scan`/`/show`, que
+  dependen del scanner legacy y no están soportados ahí todavía), pero sin
+  reconectar en cada turno.
+- **Soporte Windows para el backend SSH** (verificado en vivo contra un Win32-OpenSSH
+  real): detección automática de SO al conectar (`cmd`/`posix`/`powershell`, esta
+  última falla con mensaje claro en vez de comandos rotos), `run_command` arma
+  sintaxis `cmd.exe` (`cd /d "..." && ...`), el system prompt le avisa al modelo que
+  use `dir`/`type`/`findstr` en vez de `ls`/`grep`/`cat`, y `-w`/el picker aceptan
+  rutas nativas (`C:\Users\...`). Fix de encoding: la salida de `run_command` se
+  decodifica con el codepage OEM real del sistema (detectado vía registro), no
+  UTF-8 — confirmado en vivo que `chcp 65001` no tiene ningún efecto sobre salida
+  redirigida/en pipe pese a reportarse como "activo". Límites conocidos documentados
+  en el README: `type`/`findstr` sobre contenido UTF-8 (como escriben
+  `read_file`/`write_file`) puede mostrarse mal; un `run_command` cortado por
+  timeout puede dejar el proceso corriendo del lado Windows.
+- **`/remote` en el REPL**: conecta la sesión actual a un workspace SSH pidiendo el
+  host y la carpeta paso a paso (mismo picker que `deep remote --host`), para no
+  tener que recordar la sintaxis completa del comando. Verificado en vivo con un
+  pty real (`pexpect`) — con stdin en pipe (no interactivo) el picker se rompe por
+  una interacción conocida entre `prompt_toolkit` y `input()` con lectura adelantada
+  de buffer; con una terminal real funciona sin problemas.
+- **`/disconnect` (alias `/logout`)**: inverso de `/remote` — cierra la conexión SSH
+  y vuelve a trabajar en el directorio local, sin salir de `deep`.
+- **i18n para todo lo nuevo de SSH**: `/remote`, `/disconnect`, y el picker de
+  carpetas (`core/ssh_workspace.py::browse_remote_directory`) ahora usan `core/i18n.py`
+  igual que el resto del REPL — español/inglés según el idioma configurado. Los
+  mensajes de error de más bajo nivel de `core/ssh_workspace.py` (fallas de auth,
+  host key, etc.) quedan en español, igual que el resto de `core/` (nunca estuvieron
+  traducidos, es el mismo criterio que ya usa todo el módulo).
+- **Documentación para habilitar SSH del lado remoto** (Linux/macOS/Windows) en el
+  README, incluyendo el gotcha real que encontramos con `administrators_authorized_keys`
+  en cuentas Administrador de Windows.
+
+### Changed
+- **Visibilidad durante esperas largas**: la CLI ya no queda en silencio si una
+  llamada al modelo o un `run_command` tardan — muestra un contador de segundos
+  transcurridos, y los reintentos por rate-limit/errores de conexión se imprimen en
+  pantalla (antes solo iban al debug log).
+- `run_command` corre ahora sobre `subprocess.Popen` con polling en vez de
+  `subprocess.run`: el timeout se cumple de verdad aunque el comando deje procesos
+  huérfanos reteniendo el pipe de stdout/stderr (antes podía colgarse indefinidamente
+  en ese caso, sobre todo en Windows).
+
 ## [0.9.0] - 2026-06-22
 
 Planner adaptativo + conciencia de proyectos existentes (PR #5), con refinamientos.
