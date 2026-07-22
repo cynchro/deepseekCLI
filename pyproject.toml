@@ -36,7 +36,8 @@ serve = ["fastapi", "uvicorn[standard]", "python-multipart"]
 https = ["trustme", "qrcode"]
 semantic = ["fastembed"]
 browser = ["playwright"]
-all = ["fastapi", "uvicorn[standard]", "python-multipart", "trustme", "qrcode", "fastembed", "playwright"]
+ssh = ["paramiko"]
+all = ["fastapi", "uvicorn[standard]", "python-multipart", "trustme", "qrcode", "fastembed", "playwright", "paramiko"]
 
 [project.urls]
 Homepage = "https://github.com/cynchro/deepseekCLI"

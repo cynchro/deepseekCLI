@@ -60,6 +60,30 @@ irm https://raw.githubusercontent.com/cynchro/deepseekCLI/main/install.ps1 | iex
 
 > El instalador crea un entorno virtual en `~\.local\share\deepseekcli`, agrega el comando `deep` al PATH de usuario, y guarda la API key como variable de entorno de Windows. Abrí una nueva terminal después de instalar.
 
+### Desinstalación
+
+Si instalaste con `install.sh`/`install.ps1` (el venv aislado, no la vía PyPI):
+
+```bash
+# Linux/macOS — desde el repo clonado
+bash uninstall.sh          # borra el programa; deja tu API key/idioma/historial
+bash uninstall.sh --purge  # además borra ~/.config/deep
+```
+
+```powershell
+# Windows
+.\uninstall.ps1            # borra el programa y lo saca del PATH de usuario
+.\uninstall.ps1 -Purge     # además borra la config
+```
+
+Borran el entorno virtual (`~/.local/share/deepseekcli`) y el comando `deep`. En
+Windows también sacan esa ruta del PATH de usuario (el instalador la agrega ahí
+directo); en Linux/macOS, si vos mismo agregaste `~/.local/bin` a tu `PATH` a mano,
+no lo tocamos automáticamente —ese directorio lo comparten otras herramientas (por
+ejemplo `pip install --user`), así que sacarlo a ciegas podría romper algo más.
+
+Si instalaste con `pip install deepseek-builder` (PyPI): `pip uninstall deepseek-builder`.
+
 ### Configuración de la API key
 
 La primera vez que ejecutes `deep` te pedirá la API key y la guardará automáticamente. Obtené la tuya en [platform.deepseek.com](https://platform.deepseek.com/api_keys).
@@ -113,6 +137,108 @@ deep agent "..." -w ./mi-proyecto                          # workspace específi
 
 `deep agent` lanza el mismo loop pero para una sola tarea y termina.
 
+### Workspace remoto (SSH)
+
+`deep` puede operar sobre una carpeta en **otra máquina** vía SSH —leer, editar, listar
+y ejecutar comandos ahí— sin instalar nada en la remota (solo hace falta `sshd` corriendo):
+
+```bash
+pip install "deepseek-builder[ssh]"   # paramiko
+
+# una sola tarea y termina (igual que `deep agent` local)
+deep agent "corré los tests y arreglá lo que falle" --host usuario@servidor -w /home/usuario/mi-proyecto
+
+# REPL interactivo: te quedás trabajando ahí, turno tras turno, sin reconectar cada vez
+deep remote --host usuario@servidor -w /home/usuario/mi-proyecto
+
+# en cualquiera de los dos, sin -w se abre un picker para navegar hasta la carpeta
+deep remote --host usuario@servidor
+```
+
+¿No te acordás la sintaxis completa? Corré `deep` normal (local) y escribí **`/remote`** — te
+pregunta el host paso a paso y abre el mismo picker, sin salir del REPL ni tener que
+recordar flags. Para volver a trabajar en local sin salir de `deep`, usá **`/disconnect`**
+(o su alias `/logout`).
+
+- **Auth**: solo clave SSH / ssh-agent, reusando tu `~/.ssh/config` y `known_hosts` tal
+  cual los tenés configurados (igual que un `ssh` normal). No pide ni guarda passwords.
+  Si el host no está en `known_hosts` todavía, conectate una vez a mano con `ssh` antes.
+- **Sin `-w`**: se abre un picker de carpetas arrancando en el home remoto — un número
+  entra a esa subcarpeta, `..` sube un nivel, una ruta absoluta salta directo ahí, y
+  Enter confirma la carpeta actual como workspace. Ctrl-C/Ctrl-D cancela.
+- **`deep remote`** te deja en el mismo REPL que `deep` local (los `/comandos`, el chat,
+  todo), salvo `/scan` y `/show` (dependen del scanner legacy, no soportado todavía
+  contra un workspace remoto).
+- Todas las tools (`read_file`, `write_file`, `grep`, `search_code`, `run_command`, etc.)
+  funcionan igual que en local; `run_command` corre en la remota.
+- **Windows también anda** (verificado en vivo contra un Win32-OpenSSH real): detecta
+  el SO automáticamente al conectar, `run_command` arma sintaxis `cmd.exe` (el agente
+  usa `dir`/`type`/`findstr`, no `ls`/`grep`/`cat`), y `-w`/el picker aceptan rutas
+  nativas (`C:\Users\alexis\proyecto`). PowerShell como shell default no está
+  soportado todavía (falla con un mensaje claro, en vez de comandos rotos).
+  Dos límites conocidos: (1) `type`/`findstr` sobre un archivo con tildes/ñ puede
+  mostrarse mal si el archivo es UTF-8 (que es como escriben `read_file`/`write_file`)
+  — para LEER contenido de archivos usá esas tools, no `type` vía `run_command`;
+  (2) si un `run_command` se corta por timeout, el proceso puede quedar corriendo
+  del lado Windows (Win32-OpenSSH no mata el árbol de procesos al cerrar el canal).
+- Alcance actual: solo `deep agent`/`deep remote` (no `deep build`).
+
+#### Habilitar SSH en la máquina remota
+
+`deep` se conecta como cualquier cliente SSH — necesitás `sshd` corriendo y tu clave
+pública autorizada ahí. Si esa máquina todavía no acepta conexiones SSH:
+
+**Linux** (Debian/Ubuntu; en otras distros cambia el gestor de paquetes):
+```bash
+sudo apt install openssh-server
+sudo systemctl enable --now ssh
+```
+Después, desde TU máquina (el cliente):
+```bash
+ssh-copy-id usuario@servidor   # copia tu clave pública, pide el password una sola vez
+```
+
+**macOS**: activar "Acceso remoto" (Remote Login) en Preferencias/Configuración del
+Sistema → General → Compartir en red — o por línea de comandos:
+```bash
+sudo systemsetup -setremotelogin on
+```
+Después, `ssh-copy-id usuario@servidor` igual que en Linux.
+
+**Windows** (PowerShell **como Administrador**, en la máquina remota):
+```powershell
+# 1. Instalar el server de OpenSSH (una sola vez)
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+
+# 2. Arrancarlo y dejarlo iniciando solo con el sistema
+Start-Service sshd
+Set-Service -Name sshd -StartupType Automatic
+
+# 3. Permitir el puerto 22 en el firewall
+New-NetFirewallRule -Name "OpenSSH-Server-In-TCP" -DisplayName "OpenSSH Server (sshd)" `
+  -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+```
+Para la clave, **si tu cuenta es Administrador** (algo muy común), Windows usa un
+archivo distinto al `~/.ssh/authorized_keys` normal — este paso se olvida seguido y
+la clave queda "copiada" pero `sshd` la ignora en silencio:
+```powershell
+# pegá tu clave pública completa (la de tu MÁQUINA, no la del servidor) acá:
+Add-Content -Force -Path "$env:ProgramData\ssh\administrators_authorized_keys" -Value "ssh-ed25519 AAAA... tu@email"
+
+# permisos: sshd rechaza el archivo si no son EXACTAMENTE estos (SID en vez de
+# nombre de grupo, para que funcione sin importar el idioma de Windows)
+icacls.exe "$env:ProgramData\ssh\administrators_authorized_keys" /inheritance:r
+icacls.exe "$env:ProgramData\ssh\administrators_authorized_keys" /grant "*S-1-5-32-544:F"
+icacls.exe "$env:ProgramData\ssh\administrators_authorized_keys" /grant "*S-1-5-18:F"
+
+Restart-Service sshd
+```
+Si tu cuenta NO es Administrador, `~/.ssh/authorized_keys` funciona normal — corré
+`ssh-copy-id usuario@servidor` desde tu máquina como en Linux/macOS.
+
+En los tres casos, probá `ssh usuario@servidor` desde tu máquina antes de usar `deep`:
+si entra sin pedirte password, ya podés usar `--host`/`deep remote`/`/remote`.
+
 ---
 
 ## Cómo trabaja el agente
@@ -161,6 +287,8 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | `/skills` · `/skill <n> <tarea>` | Lista skills / corre una tarea aplicando un skill. |
 | `/cost` | Tokens y costo estimado por modelo de la sesión (con cache hits). |
 | `/clear` · `/new` | Reinicia la conversación del agente. |
+| `/remote` | Conecta la sesión actual a un workspace remoto vía SSH, pidiendo el host y la carpeta paso a paso (sin recordar `--host`). |
+| `/disconnect` · `/logout` | Cierra la conexión remota y vuelve a trabajar en el directorio local. |
 | `/balance` `/history` `/doctor` `/show` `/serve` `/upgrade` | Comandos legacy (passthrough). |
 | `/help` · `/exit` `/quit` | Ayuda / salir. |
 
@@ -365,9 +493,10 @@ tail -f debug.log                          # seguir en tiempo real
 pip install prompt_toolkit          # autocompletado e historial en el REPL
 pip install "deepseek-builder[https]"      # trustme, para deep serve --https
 pip install "deepseek-builder[semantic]"   # fastembed, búsqueda semántica en search_code
+pip install "deepseek-builder[ssh]"        # paramiko, para deep agent --host (workspace remoto)
 ```
 
-Sin `prompt_toolkit` el REPL funciona igual pero en modo básico. Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación. Sin `fastembed`, `search_code` usa BM25 léxico (igual de útil para identificadores); con él, suma matching semántico cross-idioma. Se puede desactivar con `DEEP_NO_SEMANTIC=1`.
+Sin `prompt_toolkit` el REPL funciona igual pero en modo básico. Sin `trustme`, `deep serve --https` muestra un error con las instrucciones de instalación. Sin `fastembed`, `search_code` usa BM25 léxico (igual de útil para identificadores); con él, suma matching semántico cross-idioma. Se puede desactivar con `DEEP_NO_SEMANTIC=1`. Sin `paramiko`, `--host` muestra un error con las instrucciones de instalación.
 
 El modelo de embeddings es configurable con `DEEP_EMBED_MODEL`. El default es English-centric; si hacés consultas en español conviene un modelo multilingüe:
 

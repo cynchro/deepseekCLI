@@ -8,7 +8,6 @@ Usa el MISMO DeepSeekClient que el loop (pasando model=FLASH por llamada), así
 get_stats() agrega el gasto de ambos modelos.
 """
 import re
-from pathlib import Path
 from typing import List
 
 from core.client import DeepSeekClient
@@ -93,7 +92,7 @@ class CodeBuilder:
         parts = []
         for cf in list(context_files)[:8]:
             try:
-                txt = (Path(workspace) / cf).read_text(
+                txt = (workspace / cf).read_text(
                     encoding="utf-8", errors="replace")[:self.max_context_chars]
                 parts.append(f"### {cf}\n{txt}")
             except Exception:

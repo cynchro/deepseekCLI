@@ -58,13 +58,13 @@ def _banner() -> str:
         f"  {t('agent.banner.subtitle')}\n"
         f"  v{_version()}{_C['reset']}\n"
         f"  {t('agent.banner.tagline')}\n"
-        f"  {t('agent.banner.commands')} {_C['dim']}/help /init /scan /mode /model /lang /skills /cost /clear /exit{_C['reset']}\n"
+        f"  {t('agent.banner.commands')} {_C['dim']}/help /init /scan /mode /model /lang /skills /cost /clear /remote /disconnect /exit{_C['reset']}\n"
     )
 
 
 _SLASH = ["/help", "/init", "/scan", "/tasks", "/recap", "/mode", "/model", "/lang", "/skills", "/skill",
-          "/rules", "/cost", "/clear", "/new", "/balance", "/history", "/doctor", "/show",
-          "/serve", "/upgrade", "/exit", "/quit"]
+          "/rules", "/cost", "/clear", "/new", "/remote", "/disconnect", "/logout",
+          "/balance", "/history", "/doctor", "/show", "/serve", "/upgrade", "/exit", "/quit"]
 
 
 def _help() -> str:
@@ -72,9 +72,15 @@ def _help() -> str:
 
 
 class _Repl:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, workspace=None):
         self.api_key = api_key
-        self.cwd = Path.cwd()
+        if workspace is None:
+            self.cwd = Path.cwd()
+        elif hasattr(workspace, "run_command"):
+            self.cwd = workspace  # SSHPath ya construido (workspace remoto)
+        else:
+            self.cwd = Path(workspace)
+        self.is_remote = hasattr(self.cwd, "run_command")
         self.prefs = {"mode": "ask", "model": None}
         self.agent = None
 
@@ -96,8 +102,11 @@ class _Repl:
         elif cmd == "/init":
             run_turn(self._get_agent(), INIT_TASK)
         elif cmd == "/scan":
-            run_scan(self.api_key, self.cwd,
-                     refresh=("-r" in args or "--refresh" in args))
+            if self.is_remote:
+                print("  /scan no está soportado todavía en un workspace remoto.")
+            else:
+                run_scan(self.api_key, self.cwd,
+                         refresh=("-r" in args or "--refresh" in args))
         elif cmd == "/tasks":
             from core.tasks import render
             print("  " + render(load_tasks(self.cwd)).replace("\n", "\n  "))
@@ -109,6 +118,10 @@ class _Repl:
             if self.agent:
                 self.agent.reset()
             print(t("conversation.reset"))
+        elif cmd == "/remote":
+            self._remote()
+        elif cmd == "/disconnect" or cmd == "/logout":
+            self._disconnect()
         elif cmd == "/mode":
             self._mode(args)
         elif cmd == "/model":
@@ -131,7 +144,10 @@ class _Repl:
         elif cmd == "/doctor":
             run_doctor()
         elif cmd == "/show":
-            run_show(self.cwd)
+            if self.is_remote:
+                print("  /show no está soportado todavía en un workspace remoto.")
+            else:
+                run_show(self.cwd)
         elif cmd == "/serve":
             run_serve(port=int(next((a for a in args if a.isdigit()), "8000")),
                       use_https="--https" in args)
@@ -140,6 +156,49 @@ class _Repl:
         else:
             print(t("agent.unknown.command", cmd=cmd))
         return True
+
+    def _remote(self):
+        """Conecta la sesión actual a un workspace remoto vía SSH, paso a paso
+        (host, después la carpeta con el mismo picker de `deep remote --host`),
+        sin tener que recordar la sintaxis completa del comando. Cierra la
+        bitácora de la sesión anterior antes de cambiar de workspace, igual que
+        /clear, y fuerza que se arme un agente nuevo apuntando a la remota."""
+        try:
+            host_spec = input(t("agent.remote.host_prompt")).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not host_spec:
+            print(t("agent.remote.cancelled"))
+            return
+        try:
+            from core.ssh_workspace import RemoteBrowseCancelled, resolve_remote_workspace
+            ws = resolve_remote_workspace(host_spec, None)
+        except RemoteBrowseCancelled:
+            print(t("agent.remote.cancelled"))
+            return
+        except Exception as e:
+            print(t("agent.remote.error", error=e))
+            return
+        _finalize_session(self)
+        self.cwd = ws
+        self.is_remote = True
+        self.agent = None
+        print(t("agent.remote.connected", host=ws.host_spec, path=ws))
+
+    def _disconnect(self):
+        """Cierra la conexión SSH y vuelve a trabajar en el directorio local
+        (inverso de /remote). Cierra la bitácora de la sesión remota antes de
+        soltarla, igual que /clear y /remote."""
+        if not self.is_remote:
+            print(t("agent.remote.not_connected"))
+            return
+        _finalize_session(self)
+        self.cwd.close()
+        self.cwd = Path.cwd()
+        self.is_remote = False
+        self.agent = None
+        print(t("agent.remote.disconnected", path=self.cwd))
 
     def _mode(self, args):
         if not args:
@@ -295,7 +354,7 @@ def _prompt_text(repl: "_Repl"):
     return HTML(f'<deep>deep</deep><mode>{tag}</mode><arrow> ❯ </arrow> ')
 
 
-def run(api_key: str, update_notice: str = None):
+def run(api_key: str, update_notice: str = None, workspace=None):
     from core.config import load_language, prompt_and_save_language
     if load_language() is None:
         prompt_and_save_language()
@@ -305,8 +364,13 @@ def run(api_key: str, update_notice: str = None):
         print(update_notice)
     set_title(IDLE_TITLE)
     _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    repl = _Repl(api_key)
-    _auto_onboard(repl)
+    repl = _Repl(api_key, workspace)
+    if repl.is_remote:
+        # /scan depende del scanner legacy (no adaptado a rutas remotas): el
+        # auto-onboard solo sirve para sugerirlo, así que no aplica acá.
+        print(f"  📡 conectado a {repl.cwd.host_spec}:{repl.cwd}\n")
+    else:
+        _auto_onboard(repl)
     _recap_banner(repl)
 
     if _HAS_PT:

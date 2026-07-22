@@ -39,8 +39,25 @@ def make_diff(old: str, new: str, path: str, max_lines: int = _DIFF_MAX_LINES) -
 
 def safe_path(ctx: ToolContext, path: str) -> Path:
     """Resuelve `path` dentro del workspace. Bloquea escapes (`..`, absolutos fuera)."""
+    if getattr(ctx.workspace, "is_windows", False):
+        # El modelo piensa en sintaxis cmd.exe para run_command, pero los paths
+        # de las tools de archivo siguen siendo POSIX-con-'/'. Si aun así llega
+        # un backslash (p. ej. "C:\Users\...\file.txt" o "src\main.py"), Path()
+        # LOCAL (POSIX, en la máquina de desarrollo) lo trataría como un único
+        # componente opaco -> "no existe". Normalizar acá es seguro sin
+        # excepciones: el backslash nunca es válido como carácter de nombre de
+        # archivo en Windows, siempre es separador.
+        path = path.replace("\\", "/")
     raw = Path(path)
-    p = (raw if raw.is_absolute() else ctx.workspace / raw).resolve()
+    if raw.is_absolute():
+        # Un path absoluto debe re-anclarse en el MISMO backend que ctx.workspace
+        # (ej. SSHPath si el workspace es remoto): si acá se usara `raw` tal cual
+        # (un pathlib.Path siempre LOCAL), la comparación de abajo terminaría
+        # comparando un Path local contra un workspace remoto sin sentido.
+        p = (ctx.workspace.with_absolute(str(raw)) if hasattr(ctx.workspace, "with_absolute")
+             else raw).resolve()
+    else:
+        p = (ctx.workspace / raw).resolve()
     ws = ctx.workspace.resolve()
     if p != ws and not p.is_relative_to(ws):
         raise ValueError(f"Ruta fuera del workspace: {path}")

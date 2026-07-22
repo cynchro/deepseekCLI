@@ -20,6 +20,7 @@ from core.builder import CodeBuilder
 from core.client import DeepSeekClient
 from core.models import MODEL_FLASH, MODEL_PRO
 from core.tools import schemas, dispatch, tool_names
+from core.tools import shell as _shell
 from core.tools.base import ToolContext
 
 # Investigador read-only (FLASH): solo lee, nunca escribe ni ejecuta.
@@ -179,8 +180,13 @@ class AgentLoop:
         # Serializa los pedidos de permiso cuando varios sub-agentes corren en paralelo,
         # así no se pisan los prompts interactivos.
         self._confirm_lock = threading.Lock()
-        self.workspace = Path(workspace)
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        if hasattr(workspace, "run_command"):
+            # Ya es un backend remoto (SSHPath): no re-envolver con Path() ni crear
+            # directorios locales — resolve_remote_workspace() ya validó que existe.
+            self.workspace = workspace
+        else:
+            self.workspace = Path(workspace)
+            self.workspace.mkdir(parents=True, exist_ok=True)
         self.on_event = on_event or (lambda kind, data: None)
         self.max_steps = max_steps
         self.compact_threshold = compact_threshold
@@ -213,6 +219,16 @@ class AgentLoop:
         if system_prompt is None:           # solo el agente de trabajo; no el de explore
             sys_prompt += _code_language_directive()
         sys_prompt += f"\n\nWorkspace: {self.workspace}"
+        if getattr(self.workspace, "is_windows", False):
+            sys_prompt += (
+                "\n\nEste workspace es un REMOTO WINDOWS (vía SSH). Dos reglas separadas, "
+                "no las mezcles:\n"
+                "- run_command corre en cmd.exe: usá dir, type, findstr, del, copy, etc. "
+                "Nunca ls, grep, cat, rm (no existen ahí).\n"
+                "- Los argumentos path de las tools de archivo (read_file, write_file, "
+                "edit_file, list_dir, glob) siguen en formato POSIX-con-'/' (relativos, o "
+                "absolutos tipo /C:/Users/...) — NUNCA con backslash, aunque los comandos "
+                "de run_command sí usen sintaxis Windows.")
         if rules:
             sys_prompt += "\n\nREGLAS DEL PROYECTO (.deeprules):\n" + \
                 "\n".join(f"- {r}" for r in rules)
@@ -343,19 +359,21 @@ class AgentLoop:
             return None
         self._verify_attempts += 1
         self.on_event("verify", {"command": cmd})
-        import subprocess
+
+        def on_wait(elapsed):
+            self.on_event("shell_wait", {"command": cmd, "elapsed": elapsed})
+
         try:
-            r = subprocess.run(cmd, shell=True, cwd=str(self.workspace),
-                               capture_output=True, text=True, timeout=180)
+            exit_code, stdout, stderr = _shell.execute(self.workspace, cmd, 180, on_wait)
         except Exception:
             return None  # no bloquear el cierre por un problema del runner de tests
-        self.on_event("verify_result", {"command": cmd, "exit": r.returncode})
-        if r.returncode == 0:
+        self.on_event("verify_result", {"command": cmd, "exit": exit_code})
+        if exit_code == 0:
             return None
-        out = (r.stdout or "")[-2500:]
-        if r.stderr:
-            out += "\n[stderr]\n" + r.stderr[-1000:]
-        return (f"VERIFICACIÓN AUTOMÁTICA: `{cmd}` falló (exit={r.returncode}). "
+        out = (stdout or "")[-2500:]
+        if stderr:
+            out += "\n[stderr]\n" + stderr[-1000:]
+        return (f"VERIFICACIÓN AUTOMÁTICA: `{cmd}` falló (exit={exit_code}). "
                 f"No declares terminado: arreglá el código hasta dejarlo en verde.\n{out}")
 
     def reset(self):

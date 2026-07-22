@@ -89,10 +89,13 @@ def _printer(kind: str, data: dict):
     elif kind == "compact":
         print(f"  {_C['dim']}🗜  contexto compactado (~{data.get('tokens_before',0)}→"
               f"{data.get('tokens_after',0)} tok){_C['reset']}")
+    elif kind == "shell_wait":
+        print(f"\r    {_C['dim']}⏳ {data.get('elapsed')}s transcurridos, sigue corriendo...{_C['reset']}   ",
+              end="", flush=True)
     elif kind == "tool_result":
         first = (data["result"].splitlines() or [""])[0]
         color = _C["red"] if first.startswith("ERROR") else _C["dim"]
-        print(f"    {color}↳ {first[:100]}{_C['reset']}")
+        print(f"\r{' ' * 72}\r    {color}↳ {first[:100]}{_C['reset']}")
 
 
 class Permissions:
@@ -139,7 +142,11 @@ class Permissions:
 
 def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
                mode: str = None, model=None) -> AgentLoop:
-    workspace = Path(workspace) if workspace else Path.cwd()
+    if workspace is None:
+        workspace = Path.cwd()
+    elif not hasattr(workspace, "run_command"):
+        # str/Path local; un SSHPath ya construido (backend remoto) se usa tal cual.
+        workspace = Path(workspace)
     client = DeepSeekClient(api_key)
     perms = Permissions(mode="yolo" if auto else (mode or "ask"))
     kwargs = {"model": model} if model else {}

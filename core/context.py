@@ -13,7 +13,7 @@ GLOBAL_DEEP_MD = Path.home() / ".config" / "deep" / "DEEP.md"
 
 
 def project_md_path(workspace) -> Path:
-    return Path(workspace) / "DEEP.md"
+    return workspace / "DEEP.md"
 
 
 def load_project_context(workspace) -> str:

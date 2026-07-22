@@ -212,6 +212,8 @@ _STRINGS = {
     /rules           Muestra DEEP.md y .deeprules cargados
     /cost            Tokens y costo estimado por modelo de esta sesión
     /clear /new      Reinicia la conversación del agente
+    /remote          Conecta esta sesión a un workspace remoto vía SSH (paso a paso)
+    /disconnect /logout  Cierra la conexión remota y vuelve a trabajar en local
     /balance /history /doctor /show /serve /upgrade   Comandos legacy
     /help            Esta ayuda
     /exit /quit      Salir
@@ -231,6 +233,8 @@ _STRINGS = {
     /rules           Show loaded DEEP.md and .deeprules
     /cost            Tokens and estimated cost per model this session
     /clear /new      Restart the agent conversation
+    /remote          Connect this session to a remote workspace via SSH (step by step)
+    /disconnect /logout  Close the remote connection and go back to working locally
     /balance /history /doctor /show /serve /upgrade   Legacy commands
     /help            This help
     /exit /quit      Quit
@@ -292,6 +296,39 @@ _STRINGS = {
     "agent.skill.usage.named": {
         "es": "  Uso: /skill {name} <tarea>",
         "en": "  Usage: /skill {name} <task>",
+    },
+    # --- workspace remoto vía SSH (/remote, /disconnect en cli/agent_repl.py) ---
+    "agent.remote.host_prompt": {
+        "es": "  Host (usuario@servidor[:puerto]): ",
+        "en": "  Host (user@server[:port]): ",
+    },
+    "agent.remote.cancelled": {"es": "  Cancelado.", "en": "  Cancelled."},
+    "agent.remote.connected": {
+        "es": "  📡 conectado a {host}:{path}\n",
+        "en": "  📡 connected to {host}:{path}\n",
+    },
+    "agent.remote.error": {"es": "  ❌ {error}", "en": "  ❌ {error}"},
+    "agent.remote.not_connected": {
+        "es": "  No estás conectado a ningún workspace remoto.",
+        "en": "  You're not connected to any remote workspace.",
+    },
+    "agent.remote.disconnected": {
+        "es": "  🔌 Desconectado. Volviste a trabajar en {path}.",
+        "en": "  🔌 Disconnected. Back to working in {path}.",
+    },
+    # --- picker de carpeta remota (core/ssh_workspace.py::browse_remote_directory) ---
+    "remote.browse.header": {"es": "\n📁 {path}", "en": "\n📁 {path}"},
+    "remote.browse.help": {
+        "es": "  [Enter]=elegir esta carpeta  ..=subir  <número>=entrar  /ruta=ir directo\n> ",
+        "en": "  [Enter]=select this folder  ..=up  <number>=enter  /path=jump directly\n> ",
+    },
+    "remote.browse.invalid": {
+        "es": "  '{choice}' no es una carpeta accesible acá.",
+        "en": "  '{choice}' is not an accessible folder here.",
+    },
+    "remote.windows.detected": {
+        "es": "  📡 Windows detectado — home remoto: {home}",
+        "en": "  📡 Windows detected — remote home: {home}",
     },
     # --- bitácora entre sesiones (core/journal.py) ---
     "journal.last_session": {
