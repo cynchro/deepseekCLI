@@ -13,7 +13,7 @@ _MARK = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]", "failed": "
 
 
 def tasks_path(workspace) -> Path:
-    return Path(workspace) / ".deep" / "tasks.json"
+    return workspace / ".deep" / "tasks.json"
 
 
 def load_tasks(workspace) -> dict:

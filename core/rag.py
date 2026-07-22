@@ -153,7 +153,7 @@ class CodeIndex:
     b = 0.75
 
     def __init__(self, workspace, embedder=None):
-        self.workspace = Path(workspace).resolve()
+        self.workspace = workspace.resolve()
         self.dir = self.workspace / ".deep" / "index"
         self.manifest_path = self.dir / "manifest.json"
         self.chunks_path = self.dir / "chunks.json"

@@ -40,7 +40,7 @@ _SYS_JOURNAL = (
 
 
 def journal_path(workspace) -> Path:
-    return Path(workspace) / ".deep" / "journal.md"
+    return workspace / ".deep" / "journal.md"
 
 
 def _split_entries(text: str):

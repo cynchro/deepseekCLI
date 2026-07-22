@@ -98,15 +98,54 @@ def _legacy(argv: list):
     p_agent.add_argument("-w", "--workspace", default="", metavar="DIR")
     p_agent.add_argument("-y", "--auto", action="store_true",
                          help="No pedir permiso para escribir/ejecutar")
+    p_agent.add_argument("--host", default="", metavar="USUARIO@SERVIDOR[:PUERTO]",
+                         help="Operá sobre un workspace remoto vía SSH (clave/ssh-agent, "
+                              "sin instalar deep ahí). -w es la ruta ABSOLUTA en la remota "
+                              "(ej: --host user@servidor -w /home/user/proyecto); si se omite, "
+                              "abre un picker interactivo para navegar hasta la carpeta.")
 
     def do_agent(args):
         from core.rules import load_rules
         from cli.agent_runner import run_agent
-        ws = args.workspace or str(Path.cwd())
+        if args.host:
+            from core.ssh_workspace import RemoteBrowseCancelled, resolve_remote_workspace
+            try:
+                ws = resolve_remote_workspace(args.host, args.workspace or None)
+            except RemoteBrowseCancelled:
+                print("Cancelado.")
+                sys.exit(1)
+            except Exception as e:
+                print(f"❌ {e}")
+                sys.exit(1)
+        else:
+            ws = Path(args.workspace) if args.workspace else Path.cwd()
         run_agent(" ".join(args.task), _require_api_key(), workspace=ws,
-                  rules=load_rules(Path(ws) / ".deeprules"), auto=args.auto)
+                  rules=load_rules(ws / ".deeprules"), auto=args.auto)
 
     p_agent.set_defaults(func=do_agent)
+
+    # ── remote ───────────────────────────────────────────────────────────────
+    p_remote = sub.add_parser(
+        "remote", help="REPL interactivo sobre un workspace remoto vía SSH")
+    p_remote.add_argument("--host", required=True, metavar="USUARIO@SERVIDOR[:PUERTO]")
+    p_remote.add_argument("-w", "--workspace", default="", metavar="DIR",
+                          help="Ruta ABSOLUTA en la remota; si se omite, abre un picker "
+                               "interactivo para navegar hasta la carpeta.")
+
+    def do_remote(args):
+        from core.ssh_workspace import RemoteBrowseCancelled, resolve_remote_workspace
+        from cli.agent_repl import run as run_repl
+        try:
+            ws = resolve_remote_workspace(args.host, args.workspace or None)
+        except RemoteBrowseCancelled:
+            print("Cancelado.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"❌ {e}")
+            sys.exit(1)
+        run_repl(_require_api_key(), workspace=ws)
+
+    p_remote.set_defaults(func=do_remote)
 
     # ── ask ──────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Hace una pregunta sin generar proyecto")
