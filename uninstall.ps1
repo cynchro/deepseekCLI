@@ -1,4 +1,4 @@
-# uninstall.ps1 — Desinstalador de deep CLI para Windows
+﻿# uninstall.ps1 — Desinstalador de deep CLI para Windows
 # Uso:
 #   .\uninstall.ps1           # borra el programa, deja tu config/API key
 #   .\uninstall.ps1 -Purge    # además borra la config (API key, idioma, historial)

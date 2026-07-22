@@ -1,4 +1,4 @@
-# install.ps1 — Instalador de deep CLI para Windows
+﻿# install.ps1 — Instalador de deep CLI para Windows
 # Uso:
 #   .\install.ps1                          # instala desde el directorio actual
 #   .\install.ps1 https://github.com/...  # instala desde una URL de GitHub
