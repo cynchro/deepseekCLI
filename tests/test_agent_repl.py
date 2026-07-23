@@ -172,6 +172,34 @@ def test_logout_is_an_alias_of_disconnect(monkeypatch):
     assert repl.is_remote is False
 
 
+# ── /exit y /quit también deben cerrar la conexión SSH si hay una activa ───
+# (sin esto el hilo de paramiko no es daemon y el proceso queda colgado tras
+# imprimir "goodbye", forzando a cerrar la terminal a mano).
+
+def test_exit_closes_remote_connection():
+    ws = _FakeRemoteWorkspace("/proj")
+    repl = _Repl(api_key="k", workspace=ws)
+
+    cont = repl.slash("/exit", [])
+    assert cont is False
+    assert ws.closed is True
+
+
+def test_quit_closes_remote_connection():
+    ws = _FakeRemoteWorkspace("/proj")
+    repl = _Repl(api_key="k", workspace=ws)
+
+    cont = repl.slash("/quit", [])
+    assert cont is False
+    assert ws.closed is True
+
+
+def test_exit_does_not_touch_close_when_local():
+    repl = _Repl(api_key="k")  # cwd local: Path, sin close()
+    cont = repl.slash("/exit", [])
+    assert cont is False
+
+
 # ── i18n: los mensajes nuevos respetan el idioma configurado ───────────────
 
 def test_remote_messages_switch_to_english(monkeypatch, tmp_path, capsys):

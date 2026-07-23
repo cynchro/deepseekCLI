@@ -16,9 +16,16 @@ try:
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.styles import Style
+    from cli.paste import paste_key_bindings, expand_pastes, reset_pastes
     _HAS_PROMPT_TOOLKIT = True
 except ImportError:
     _HAS_PROMPT_TOOLKIT = False
+
+    def expand_pastes(text: str) -> str:
+        return text
+
+    def reset_pastes() -> None:
+        pass
 
 from core.rules import load_rules
 from core.i18n import t, is_affirmative
@@ -418,6 +425,7 @@ def _run_rich(api_key: str):
         history=FileHistory(str(_HISTORY_FILE)),
         auto_suggest=AutoSuggestFromHistory(),
         completer=_build_completer(list(loaded_skills)),
+        key_bindings=paste_key_bindings(),
         style=_STYLE,
         complete_while_typing=True,
     )
@@ -432,9 +440,10 @@ def _run_rich(api_key: str):
         word = t("word.message.singular") if n == 1 else t("word.message.plural")
         print(t("conversation.restored", n=n, word=word))
     while True:
+        reset_pastes()
         try:
             project = _detect_project()
-            line = session.prompt(_prompt_text(project, state.get("in_conversation", False)))
+            line = expand_pastes(session.prompt(_prompt_text(project, state.get("in_conversation", False))))
         except KeyboardInterrupt:
             continue
         except EOFError:

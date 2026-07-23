@@ -18,9 +18,16 @@ try:
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.styles import Style
+    from cli.paste import paste_key_bindings, expand_pastes, reset_pastes
     _HAS_PT = True
 except ImportError:
     _HAS_PT = False
+
+    def expand_pastes(text: str) -> str:
+        return text
+
+    def reset_pastes() -> None:
+        pass
 
 import core.skills as skills_mod
 from core import journal as _journal
@@ -96,6 +103,8 @@ class _Repl:
     # ── slash commands ───────────────────────────────────────────────────────
     def slash(self, cmd: str, args: list) -> bool:
         if cmd in ("/exit", "/quit"):
+            if self.is_remote:
+                self.cwd.close()  # sin esto el hilo de paramiko no es daemon y el proceso queda colgado
             return False
         elif cmd == "/help":
             print(_help())
@@ -380,6 +389,7 @@ def run(api_key: str, update_notice: str = None, workspace=None):
             history=FileHistory(str(_HISTORY_FILE)),
             auto_suggest=AutoSuggestFromHistory(),
             completer=WordCompleter(_SLASH, sentence=False, match_middle=False),
+            key_bindings=paste_key_bindings(),
             style=style, complete_while_typing=True,
         )
         read = lambda: session.prompt(_prompt_text(repl))
@@ -387,13 +397,16 @@ def run(api_key: str, update_notice: str = None, workspace=None):
         read = lambda: input(_prompt_text(repl))
 
     while True:
+        reset_pastes()
         try:
-            line = read().strip()
+            line = expand_pastes(read()).strip()
         except KeyboardInterrupt:
             continue
         except EOFError:
             print()
             _finalize_session(repl)
+            if repl.is_remote:
+                repl.cwd.close()
             print(t("goodbye"))
             break
         if not line:
