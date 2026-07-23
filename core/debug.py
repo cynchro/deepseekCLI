@@ -64,12 +64,6 @@ def init(log_path: str = "debug.log") -> DebugLogger:
     return _logger
 
 
-def init_if_env():
-    """Inicializa si DEEP_DEBUG está seteada (usada por módulos de core)."""
-    if os.getenv("DEEP_DEBUG") and not is_active():
-        init()
-
-
 def log(tag: str, msg: str):
     if _logger:
         _logger.log(tag, msg)

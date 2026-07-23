@@ -1,5 +1,4 @@
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -85,42 +84,6 @@ def show_evaluation(result: Dict):
             print(f"   → {s}")
     except Exception:
         pass
-
-
-def show_project_summary(project_dir: Path, ctx: Dict, evaluation: Dict):
-    task = ctx.get("task", "Desconocido")
-    model = ctx.get("model", "?")
-    timestamp = ctx.get("timestamp", "")
-    date_str = ""
-    if timestamp:
-        try:
-            date_str = datetime.fromisoformat(timestamp).strftime("%d/%m/%Y %H:%M")
-        except Exception:
-            date_str = timestamp[:16]
-    files = [f for f in project_dir.rglob("*")
-             if f.is_file() and ".deep" not in f.parts and not f.name.startswith(".")]
-    score = evaluation.get("overall_score")
-    if evaluation.get("success") is True:
-        status = f"✅ Aprobado{f'  (score {score}/10)' if score else ''}"
-    elif evaluation.get("success") is False:
-        status = f"⚠️  Necesita ajustes{f'  (score {score}/10)' if score else ''}"
-    else:
-        status = "❓ Sin evaluar"
-
-    W = 56
-    print("\n" + "─" * W)
-    print(f"📁 {project_dir}")
-    print("─" * W)
-    short = task[:W - 12]
-    print(f"  Tarea:    {short}{'…' if len(task) > len(short) else ''}")
-    print(f"  Modelo:   {model}")
-    if date_str:
-        print(f"  Fecha:    {date_str}")
-    print(f"  Archivos: {len(files)}")
-    print(f"  Estado:   {status}")
-    for issue in evaluation.get("issues", [])[:3]:
-        print(f"  • {issue[:W - 4]}")
-    print("─" * W)
 
 
 def show_history(experiences: List[Dict]):

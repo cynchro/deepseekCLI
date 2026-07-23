@@ -7,7 +7,16 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-23
+
 ### Added
+- **Manejo de texto pegado (paste) en el REPL**: pegar código o texto largo ya
+  no dispara el menú de autocompletado de `/comandos` — pasaba porque cualquier
+  `/` dentro del contenido pegado activaba `complete_while_typing`. Los pegados
+  multilínea o de más de 200 caracteres se colapsan a un placeholder
+  (`[Pasted text #1 +12 lines]`) que se expande al texto real recién al enviar
+  la línea, igual que en Claude Code. Nuevo `cli/paste.py`, usado por
+  `cli/agent_repl.py` y `cli/repl.py`.
 - **`uninstall.sh` / `uninstall.ps1`**: desinstalan lo que crean `install.sh`/`install.ps1`
   (el venv aislado en `~/.local/share/deepseekcli` y el comando `deep`). En Windows
   también sacan esa ruta del PATH de usuario (que `install.ps1` agrega directo a la
@@ -69,6 +78,16 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   `subprocess.run`: el timeout se cumple de verdad aunque el comando deje procesos
   huérfanos reteniendo el pipe de stdout/stderr (antes podía colgarse indefinidamente
   en ese caso, sobre todo en Windows).
+- **Reorganización de documentación**: `arquitectura.md`, `CHANGELOG.md`,
+  `MEJORAS.md`, `PHILOSOPHY.md`, `PLAN.md`, `diferencias.md`/`differences.md` se
+  movieron a `doc/`. `README.md`, `LICENSE`, `CODE_OF_CONDUCT.md` y
+  `CONTRIBUTING.md` quedan en la raíz (convención de GitHub).
+
+### Fixed
+- **`/exit` y `/quit` no cerraban la conexión SSH** en un workspace remoto: al
+  no llamar `close()`, el hilo no-daemon de `paramiko` podía dejar el proceso
+  colgado tras el mensaje de despedida, forzando a cerrar la terminal a mano.
+  Ahora cierran la conexión igual que `/disconnect` antes de salir.
 
 ## [0.9.0] - 2026-06-22
 

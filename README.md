@@ -16,7 +16,7 @@ hace el trabajo barato de lectura/resumen. Todo corre local — tu código y tu 
 quedan en tu máquina.
 
 > **Filosofía de calidad:** el modelo fuerte escribe el código que importa. No delegamos la
-> calidad para ahorrar tokens (DeepSeek ya es barato). Ver [PHILOSOPHY.md](PHILOSOPHY.md).
+> calidad para ahorrar tokens (DeepSeek ya es barato). Ver [PHILOSOPHY.md](doc/PHILOSOPHY.md).
 
 ---
 
@@ -516,11 +516,11 @@ Funciona en Linux, macOS y Windows 10+ (con secuencias ANSI habilitadas automát
 
 ## Changelog
 
-Ver [CHANGELOG.md](CHANGELOG.md) para el detalle de cada versión.
+Ver [CHANGELOG.md](doc/CHANGELOG.md) para el detalle de cada versión.
 
 ## Philosophy
 
-Ver [PHILOSOPHY.md](PHILOSOPHY.md).
+Ver [PHILOSOPHY.md](doc/PHILOSOPHY.md).
 
 ## Contributing
 
