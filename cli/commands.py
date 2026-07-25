@@ -951,7 +951,16 @@ def run_scan(api_key: str, project_dir: Path, model: str = "deepseek-chat",
     ctx_file = project_dir / ".deep" / "context.json"
     if ctx_file.exists() and not refresh:
         try:
-            return json.loads(ctx_file.read_text(encoding="utf-8"))
+            cached = json.loads(ctx_file.read_text(encoding="utf-8"))
+            if not quiet:
+                from core.project_scanner import format_map
+                pmap = cached.get("project_map")
+                print()
+                if pmap:
+                    print(format_map(pmap))
+                print(f"\n(usando mapa cacheado de {cached.get('scanned_at', '?')}; "
+                      "corré /scan -r para refrescarlo)")
+            return cached
         except Exception:
             pass  # cache ilegible → re-escanear
 

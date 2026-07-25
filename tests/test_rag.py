@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.rag import CodeIndex, tokenize
 from core.tools.base import ToolContext
+import core.tools.search_code as search_code_mod
 from core.tools.search_code import search_code
 
 
@@ -53,18 +54,34 @@ def test_index_skips_its_own_dir():
 def test_tool_returns_locations_and_caches():
     ws = _mk_workspace()
     ctx = ToolContext(workspace=ws)
-    ctx._embedder = None                    # fija BM25: test determinista con o sin fastembed
+    search_code_mod._embedder = None        # fija BM25: test determinista con o sin fastembed
     out = search_code(ctx, "check_credentials login")
     assert "check_credentials" in out
     assert ":" in out                       # trae archivo:línea
-    assert getattr(ctx, "_code_index", None) is not None  # índice cacheado en el ctx
+    assert str(ws.resolve()) in search_code_mod._indexes  # índice cacheado a nivel de proceso
 
 
 def test_tool_empty_query_no_match():
     ws = _mk_workspace()
     ctx = ToolContext(workspace=ws)
-    ctx._embedder = None                    # en BM25 una consulta sin solape no matchea
+    search_code_mod._embedder = None        # en BM25 una consulta sin solape no matchea
     assert "sin coincidencias" in search_code(ctx, "zzz_inexistente_xyz")
+
+
+def test_shared_index_across_contexts_same_workspace():
+    """Regresión: antes cada ToolContext (uno por AgentLoop) cargaba su propia copia
+    del embedder + índice de vectores. Con sub-agentes en paralelo (spawn_agent/explore)
+    eso multiplicaba la RAM y terminó en un OOM kill real. Ahora el índice se comparte
+    a nivel de proceso por workspace, sin importar cuántos ToolContext lo consulten."""
+    ws = _mk_workspace()
+    search_code_mod._embedder = None
+    ctx_padre = ToolContext(workspace=ws)
+    ctx_subagente = ToolContext(workspace=ws)
+    search_code(ctx_padre, "login")
+    idx_padre = search_code_mod._indexes[str(ws.resolve())]
+    search_code(ctx_subagente, "login")
+    idx_subagente = search_code_mod._indexes[str(ws.resolve())]
+    assert idx_padre is idx_subagente
 
 
 # ── camino semántico (embedder opcional) ────────────────────────────────────────

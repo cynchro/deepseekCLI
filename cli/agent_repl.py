@@ -330,26 +330,36 @@ def _auto_onboard(repl: "_Repl") -> None:
 
 
 def _recap_banner(repl: "_Repl") -> None:
-    """Al abrir, muestra la última entrada de la bitácora + tareas abiertas."""
+    """Al abrir, muestra la última entrada de la bitácora + tareas abiertas.
+
+    Las tareas se muestran AUNQUE no haya bitácora: journal.md solo se escribe al
+    cerrar prolijamente (_finalize_session, con una llamada a FLASH), así que un
+    cierre abrupto (kill -9, OOM) nunca llega a escribirla. .deep/tasks.json en
+    cambio se guarda en cada write_tasks/update_task —una escritura simple y
+    síncrona—, así que sigue siendo la fuente de verdad de qué falta aunque la
+    sesión anterior se haya cortado de golpe."""
     recap = _journal.load_recap(repl.cwd)
-    if not recap:
-        return
-    stamp, done, nxt = "", "", ""
-    for line in recap.splitlines():
-        s = line.strip()
-        if s.startswith("## "):
-            stamp = s[3:].strip()
-        elif s.startswith("**Hecho:**"):
-            done = s[len("**Hecho:**"):].strip()
-        elif s.startswith("**Próximo paso:**"):
-            nxt = s[len("**Próximo paso:**"):].strip()
-    print(t("journal.last_session", b=_C["bold"], r=_C["reset"], stamp=stamp))
-    if done:
-        print(t("journal.done", text=done[:300]))
-    if nxt:
-        print(t("journal.next_step", text=nxt[:300]))
     n_open = sum(1 for x in load_tasks(repl.cwd).get("tasks", [])
                  if x.get("status") in ("pending", "in_progress"))
+    if not recap and not n_open:
+        return
+    if recap:
+        stamp, done, nxt = "", "", ""
+        for line in recap.splitlines():
+            s = line.strip()
+            if s.startswith("## "):
+                stamp = s[3:].strip()
+            elif s.startswith("**Hecho:**"):
+                done = s[len("**Hecho:**"):].strip()
+            elif s.startswith("**Próximo paso:**"):
+                nxt = s[len("**Próximo paso:**"):].strip()
+        print(t("journal.last_session", b=_C["bold"], r=_C["reset"], stamp=stamp))
+        if done:
+            print(t("journal.done", text=done[:300]))
+        if nxt:
+            print(t("journal.next_step", text=nxt[:300]))
+    elif n_open:
+        print(t("journal.abrupt_end"))
     if n_open:
         print(t("journal.open_tasks", n=n_open))
     print(t("journal.continue_hint", b=_C["bold"], r=_C["reset"]))

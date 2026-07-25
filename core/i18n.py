@@ -341,6 +341,12 @@ _STRINGS = {
         "es": "     Tareas abiertas: {n}",
         "en": "     Open tasks: {n}",
     },
+    "journal.abrupt_end": {
+        "es": "  ⚠️  La sesión anterior se cortó de golpe (cierre forzado o sin memoria) "
+              "y no llegó a guardar bitácora — pero el plan de tareas sigue intacto:",
+        "en": "  ⚠️  The previous session ended abruptly (force-killed or out of memory) "
+              "and never saved a journal entry — but the task plan is still intact:",
+    },
     "journal.continue_hint": {
         "es": "     → escribí {b}seguí{r} para continuar, o tu instrucción.\n",
         "en": "     → type {b}continue{r} to resume, or your instruction.\n",
