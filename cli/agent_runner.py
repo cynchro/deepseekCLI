@@ -11,7 +11,7 @@ MODES = ("ask", "auto", "plan", "yolo")
 _MODE_HELP = {
     "ask":  "pide permiso para escribir y ejecutar (default)",
     "auto": "acepta ediciones de archivos; pregunta para shell",
-    "plan": "solo lectura: bloquea escrituras y shell",
+    "plan": "solo lectura: investiga y propone un plan para aprobar antes de ejecutar",
     "yolo": "acepta todo sin preguntar",
 }
 
@@ -47,6 +47,9 @@ def _printer(kind: str, data: dict):
         from core.tasks import render
         body = render(data["data"]).replace("\n", "\n  ")
         print(f"  {_C['cyan']}📋 plan{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}")
+    elif kind == "plan_proposed":
+        body = data.get("plan", "").replace("\n", "\n  ")
+        print(f"\n  {_C['cyan']}📋 plan propuesto{_C['reset']}\n  {_C['dim']}{body}{_C['reset']}\n")
     elif kind == "search_code":
         print(f"  {_C['cyan']}🔎 search_code{_C['reset']} {_C['dim']}{data.get('query','')[:70]}"
               f" ({data.get('chunks',0)} chunks){_C['reset']}")
@@ -66,6 +69,9 @@ def _printer(kind: str, data: dict):
         print(f"    {col}↳ verificación {'OK' if ok else 'FALLÓ'} (exit={data.get('exit')}){_C['reset']}")
     elif kind == "verify_reinject":
         print(f"  {_C['yellow']}↻ tests en rojo — el agente sigue para arreglarlo{_C['reset']}")
+    elif kind == "plan_reinject":
+        print(f"  {_C['yellow']}↻ te propuso texto en vez de un plan formal — "
+              f"le pido que use exit_plan_mode{_C['reset']}")
     elif kind == "explore_start":
         print(f"  {_C['cyan']}🔍 explorando (flash):{_C['reset']} "
               f"{_C['dim']}{data.get('question','')[:80]}{_C['reset']}")
@@ -96,6 +102,32 @@ def _printer(kind: str, data: dict):
         first = (data["result"].splitlines() or [""])[0]
         color = _C["red"] if first.startswith("ERROR") else _C["dim"]
         print(f"\r{' ' * 72}\r    {color}↳ {first[:100]}{_C['reset']}")
+    elif kind == "info":
+        # Solo lo emite el daemon (ej. Permissions._notify vía WS) — la
+        # sesión local imprime directo con print(), sin pasar por acá.
+        print(data.get("text", ""))
+
+
+def _input_ask(desc: str, is_shell: bool, kind: str = "confirm") -> str:
+    """Callback `ask` default de Permissions: pide confirmación por stdin/stdout.
+    Es función de módulo (no método) para poder reusarla tal cual como
+    `ask_confirm` del cliente del daemon (cli/daemon_client.py), que responde
+    confirm_request sin tener una instancia de Permissions local.
+
+    `kind="plan"` es la aprobación de exit_plan_mode: prompt distinto, sin la
+    opción "a" (no aplica a aprobar un plan)."""
+    try:
+        if kind == "plan":
+            return input(
+                f"  {_C['yellow']}¿Aprobás {desc} y pasás a modo ejecución?{_C['reset']} [s/N] "
+            ).strip().lower()
+        return input(
+            f"  {_C['yellow']}¿Permitir {desc}?{_C['reset']} [s/N/{_C['bold']}a{_C['reset']}] "
+            f"{_C['dim']}(a = no preguntar más esta sesión){_C['reset']} "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return ""
 
 
 class Permissions:
@@ -106,9 +138,32 @@ class Permissions:
     toda la sesión: eso cambia el modo a 'auto' (escrituras automáticas, el shell
     sigue preguntando) o a 'yolo' si la acción era un comando de shell."""
 
-    def __init__(self, mode: str = "ask", interactive: bool = True):
+    def __init__(self, mode: str = "ask", interactive: bool = True, ask=None, notify=None,
+                 on_mode_change=None):
+        """ask(desc, is_shell, kind="confirm") -> str y notify(msg) son pluggables para
+        poder responder confirmaciones por un transporte distinto a stdin/stdout (ej.
+        round-trip por WebSocket desde el daemon). Por default se comportan igual que
+        antes (input()/print() locales). on_mode_change(new_mode) es opcional: lo usa
+        el daemon para hacer broadcast del cambio de modo a otros clientes atacheados."""
         self.mode = mode if mode in MODES else "ask"
+        self._pre_plan_mode = None    # modo al que volver cuando se apruebe un plan
         self.interactive = interactive
+        self._ask = ask or _input_ask
+        self._notify = notify or print
+        self._on_mode_change = on_mode_change
+
+    def set_mode(self, new_mode: str) -> None:
+        """Punto único para cambiar de modo: recuerda el modo previo al ENTRAR a
+        'plan' (para volver ahí cuando se apruebe un plan) y notifica el cambio si
+        hay callback configurado. Reemplaza asignar `.mode` directo."""
+        new_mode = new_mode if new_mode in MODES else "ask"
+        if new_mode == self.mode:
+            return
+        if new_mode == "plan":
+            self._pre_plan_mode = self.mode
+        self.mode = new_mode
+        if self._on_mode_change:
+            self._on_mode_change(new_mode)
 
     def __call__(self, desc: str) -> bool:
         is_shell = desc.startswith("ejecutar")
@@ -123,21 +178,29 @@ class Permissions:
         return self._prompt(desc, is_shell)
 
     def _prompt(self, desc: str, is_shell: bool) -> bool:
-        try:
-            ans = input(
-                f"  {_C['yellow']}¿Permitir {desc}?{_C['reset']} [s/N/{_C['bold']}a{_C['reset']}] "
-                f"{_C['dim']}(a = no preguntar más esta sesión){_C['reset']} "
-            ).strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return False
+        ans = self._ask(desc, is_shell)
         if ans in ("a", "always", "todo", "t"):
-            self.mode = "yolo" if is_shell else "auto"
+            self.set_mode("yolo" if is_shell else "auto")
             que = "todo, incluido el shell" if is_shell else "las escrituras/ediciones"
-            print(f"  {_C['green']}✓ No vuelvo a preguntar por {que} esta sesión "
-                  f"(modo {self.mode}). Volvé a 'ask' con /mode ask.{_C['reset']}")
+            self._notify(f"  {_C['green']}✓ No vuelvo a preguntar por {que} esta sesión "
+                         f"(modo {self.mode}). Volvé a 'ask' con /mode ask.{_C['reset']}")
             return True
         return ans in ("s", "si", "sí", "y", "yes")
+
+    def confirm_plan(self, plan: str) -> bool:
+        """Aprobación de exit_plan_mode: a diferencia de __call__, SIEMPRE pregunta
+        (bypassa el gate de modo — en modo 'plan' __call__ se auto-denegaría antes de
+        preguntar nada). Si se aprueba, vuelve al modo previo a entrar en 'plan'."""
+        if not self.interactive:
+            return False
+        ans = self._ask("el plan propuesto arriba", False, kind="plan")
+        approved = ans in ("s", "si", "sí", "y", "yes")
+        if approved:
+            target = self._pre_plan_mode or "ask"
+            self._pre_plan_mode = None
+            self.set_mode(target)
+            self._notify(f"  {_C['green']}✓ Plan aprobado — paso a modo {target}.{_C['reset']}")
+        return approved
 
 
 def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
@@ -153,7 +216,8 @@ def make_agent(api_key: str, workspace=None, rules=None, auto: bool = False,
     loop = AgentLoop(
         client, workspace, rules=rules,
         project_context=load_project_context(workspace),
-        on_event=_printer, confirm=perms, **kwargs,
+        on_event=_printer, confirm=perms, confirm_plan=perms.confirm_plan,
+        mode=perms.mode, get_mode=lambda: perms.mode, **kwargs,
     )
     loop.permissions = perms          # para que el REPL pueda cambiar el modo
     return loop

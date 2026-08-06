@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
     "requests>=2.28",
     "prompt_toolkit",
+    "websocket-client",
 ]
 
 [project.optional-dependencies]

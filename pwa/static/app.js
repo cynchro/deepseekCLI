@@ -33,6 +33,11 @@ const dirCurrentEl  = document.getElementById('dir-current');
 const dirList       = document.getElementById('dir-list');
 const dirSelectBtn  = document.getElementById('dir-select-btn');
 
+const sessionsBtn      = document.getElementById('sessions-btn');
+const sessionsPanel    = document.getElementById('sessions-panel');
+const closeSessionsBtn = document.getElementById('close-sessions-btn');
+const sessionsList     = document.getElementById('sessions-list');
+
 const logoEl        = document.querySelector('.logo');
 const cmdPalette    = document.getElementById('cmd-palette');
 
@@ -176,9 +181,17 @@ async function runAsk(text, loadingEl) {
   setLoading(loadingEl, data.response);
 }
 
-// ── Agente (loop con tools, streaming SSE) ─────────────────────────────────────
+// ── Agente (loop con tools, attach en vivo vía WebSocket) ──────────────────────
+//
+// A diferencia del modo "ask" (sessionId / /api/ask, sin cambios), el modo
+// agente vive en el daemon (deep serve) y se identifica con su propio
+// agentSessionId: la misma sesión puede estar atacheada simultáneamente desde
+// la terminal y desde acá (ver /ws/session en pwa/main.py y cli/daemon_client.py
+// del lado de la terminal). Reusamos el socket entre turnos mientras siga
+// abierto y atachea a la MISMA sesión (ver ensureSocket).
 
 let agentMode = localStorage.getItem('deep_agent') === '1';
+let agentSessionId = localStorage.getItem('deep_agent_session') || '';
 
 function updateAgentBtn() {
   if (agentBtn) agentBtn.classList.toggle('active', agentMode);
@@ -202,15 +215,108 @@ function fmtAgentArgs(ev) {
   return a.path || a.command || a.pattern || a.spec || '';
 }
 
-async function runAgent(text, loadingEl) {
-  const res = await fetch('/api/agent', {
-    method: 'POST',
-    headers: jsonHeaders(),
-    body: JSON.stringify({ message: text, session_id: sessionId, project_dir: workspace }),
-  });
-  if (res.status === 401) { logout(); return; }
-  if (!res.body) { setLoading(loadingEl, '❌ El navegador no soporta streaming.'); return; }
+let ws = null;               // WebSocket abierto y atacheado, o null
+let wsAttachedTo = null;     // session_id al que ESE socket está atacheado
 
+function wsUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${proto}//${location.host}/ws/session`;
+}
+
+function closeSocket() {
+  if (ws) { try { ws.close(); } catch {} }
+  ws = null;
+  wsAttachedTo = null;
+}
+
+// Nueva sesión de agente (workspace nuevo, "+", etc): fuerza attach fresco en
+// el próximo turno. No toca sessionId (modo ask), son cosas separadas.
+function resetAgentSession() {
+  closeSocket();
+  agentSessionId = '';
+  localStorage.removeItem('deep_agent_session');
+}
+
+function ensureSocket() {
+  if (ws && ws.readyState === WebSocket.OPEN && wsAttachedTo === agentSessionId) {
+    return Promise.resolve(ws);
+  }
+  closeSocket();
+  return new Promise((resolve, reject) => {
+    const sock = new WebSocket(wsUrl());
+    let settled = false;
+    sock.addEventListener('open', () => {
+      sock.send(JSON.stringify({ type: 'auth', token: password }));
+      sock.send(JSON.stringify({
+        type: 'attach', session_id: agentSessionId, project_dir: workspace, mode: 'ask',
+      }));
+    });
+    sock.addEventListener('message', (rawEv) => {
+      if (settled) return;  // el resto de los mensajes los procesa runAgent()
+      let msg; try { msg = JSON.parse(rawEv.data); } catch { return; }
+      if (msg.type !== 'attached') return;
+      agentSessionId = msg.session_id;
+      wsAttachedTo = msg.session_id;
+      localStorage.setItem('deep_agent_session', agentSessionId);
+      ws = sock;
+      settled = true;
+      resolve(sock);
+    });
+    sock.addEventListener('close', () => {
+      if (ws === sock) { ws = null; wsAttachedTo = null; }
+      if (!settled) { settled = true; reject(new Error('Se cerró la conexión antes de atachear.')); }
+    });
+    sock.addEventListener('error', () => {
+      if (!settled) { settled = true; reject(new Error('No se pudo conectar al daemon (deep serve).')); }
+    });
+  });
+}
+
+function showConfirmPrompt(sock, msg) {
+  const div = document.createElement('div');
+  div.className = 'message assistant confirm-prompt';
+  const isPlan = msg.kind === 'plan';
+  const label = isPlan
+    ? '**¿Aprobás este plan y pasás a modo ejecución?**'
+    : msg.is_shell
+      ? `**¿Permitir ejecutar?**\n\`${(msg.desc || '').replace(/^ejecutar:\s*/, '')}\``
+      : `**¿Permitir?**\n${msg.desc || ''}`;
+  div.innerHTML = marked.parse(label);
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-actions';
+  const answer = (value) => {
+    sock.send(JSON.stringify({ type: 'confirm_response', request_id: msg.request_id, answer: value }));
+    actions.remove();
+    div.classList.add('confirm-answered');
+  };
+  const mkBtn = (label, value, cls) => {
+    const b = document.createElement('button');
+    b.className = `confirm-btn ${cls}`;
+    b.textContent = label;
+    b.addEventListener('click', () => answer(value));
+    return b;
+  };
+  actions.appendChild(mkBtn('Sí', 's', 'confirm-yes'));
+  actions.appendChild(mkBtn('No', 'n', 'confirm-no'));
+  if (!isPlan) {
+    actions.appendChild(mkBtn('No preguntar más', 'a', 'confirm-always'));
+  }
+  div.appendChild(actions);
+
+  messagesEl.appendChild(div);
+  scrollDown();
+}
+
+function showPlanProposed(plan) {
+  const div = document.createElement('div');
+  div.className = 'message assistant plan-proposal';
+  div.innerHTML = '<div class="plan-header">📋 Plan propuesto</div>' + marked.parse(plan || '');
+  messagesEl.appendChild(div);
+  scrollDown();
+}
+
+function runAgent(text, loadingEl) {
   loadingEl.className = 'message assistant';
   const steps = [];
   const render = (finalText) => {
@@ -222,35 +328,69 @@ async function runAgent(text, loadingEl) {
   };
   render();
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split('\n\n');
-    buf = parts.pop();
-    for (const part of parts) {
-      const line = part.replace(/^data:\s?/, '').trim();
-      if (!line) continue;
-      let ev; try { ev = JSON.parse(line); } catch { continue; }
-      if (ev.type === 'start' && ev.session_id) {
-        sessionId = ev.session_id;
-        localStorage.setItem('deep_session', sessionId);
-      } else if (ev.type === 'tool_call') {
-        steps.push(`⚙ ${ev.name} ${fmtAgentArgs(ev)}`.trim());
-        render();
-      } else if (ev.type === 'build') {
-        steps.push(`↳ ${ev.action} con flash`);
-        render();
-      } else if (ev.type === 'done') {
-        render(ev.content || (ev.success ? '✅ Listo.' : '⚠️ Terminó con advertencias.'));
-      } else if (ev.type === 'fatal') {
-        render(`❌ ${ev.error}`);
+  return ensureSocket().then((sock) => new Promise((resolve) => {
+    const onMessage = (rawEv) => {
+      let msg; try { msg = JSON.parse(rawEv.data); } catch { return; }
+      switch (msg.type) {
+        case 'tool_call':
+          steps.push(`⚙ ${msg.name} ${fmtAgentArgs(msg)}`.trim());
+          render();
+          break;
+        case 'build':
+          steps.push(`↳ ${msg.action} con flash`);
+          render();
+          break;
+        case 'verify':
+          steps.push(`✓ verificando: ${msg.command || ''}`);
+          render();
+          break;
+        case 'subagent_start':
+          steps.push(`↪ sub-agente: ${(msg.task || '').slice(0, 60)}`);
+          render();
+          break;
+        case 'explore_start':
+          steps.push(`🔍 explorando: ${(msg.question || '').slice(0, 60)}`);
+          render();
+          break;
+        case 'compact':
+          steps.push('🗜 contexto compactado');
+          render();
+          break;
+        case 'auto_resume':
+          steps.push(`↻ sigo solo (${msg.attempt}/${msg.max})`);
+          render();
+          break;
+        case 'confirm_request':
+          showConfirmPrompt(sock, msg);
+          break;
+        case 'plan_proposed':
+          showPlanProposed(msg.plan);
+          break;
+        case 'busy':
+          sock.removeEventListener('message', onMessage);
+          render('⏳ esta sesión ya tiene un turno en curso (otro cliente atacheado).');
+          resolve();
+          break;
+        case 'done':
+          sock.removeEventListener('message', onMessage);
+          render(msg.content || (msg.success ? '✅ Listo.' : `⚠️ ${msg.error || 'Terminó con advertencias.'}`));
+          resolve();
+          break;
+        case 'fatal':
+          sock.removeEventListener('message', onMessage);
+          render(`❌ ${msg.error}`);
+          resolve();
+          break;
+        // thinking/tool_result/mode_changed/model_changed/info: sin UI dedicada
+        // todavía, se ignoran sin romper (mismo criterio que ya tenía este
+        // parser con los kinds que no reconocía).
       }
-    }
-  }
+    };
+    sock.addEventListener('message', onMessage);
+    sock.send(JSON.stringify({ type: 'message', text }));
+  })).catch((err) => {
+    render(`❌ ${err.message}`);
+  });
 }
 
 // ── Comandos CLI ──────────────────────────────────────────────────────────────
@@ -279,6 +419,7 @@ async function runCommand(cmd, args, loadingEl) {
     workspace = data.project_path;
     localStorage.setItem('deep_workspace', workspace);
     updateWorkspaceLabel();
+    resetAgentSession();  // workspace nuevo ⇒ sesión de agente nueva (ver arriba)
     log.info && console.log('workspace actualizado a:', workspace);
   }
 
@@ -293,6 +434,7 @@ newChatBtn.addEventListener('click', async () => {
   const data = await res.json();
   sessionId = data.session_id;
   localStorage.setItem('deep_session', sessionId);
+  resetAgentSession();  // "+" también arranca una sesión de agente nueva
   messagesEl.innerHTML = '<div class="welcome"><p>¿En qué puedo ayudarte?</p></div>';
 });
 
@@ -368,6 +510,7 @@ panelOverlay?.addEventListener('click', closeAllPanels);
 function closeAllPanels() {
   projectsPanel?.classList.add('hidden');
   dirBrowser?.classList.add('hidden');
+  sessionsPanel?.classList.add('hidden');
   panelOverlay?.classList.add('hidden');
 }
 
@@ -375,6 +518,7 @@ function closeAllPanels() {
 
 projectsBtn?.addEventListener('click', () => {
   dirBrowser?.classList.add('hidden');
+  sessionsPanel?.classList.add('hidden');
   projectsPanel?.classList.remove('hidden');
   panelOverlay?.classList.remove('hidden');
   loadProjects();
@@ -435,6 +579,7 @@ function selectProject(p) {
   workspace = p.path;
   localStorage.setItem('deep_workspace', p.path);
   updateWorkspaceLabel();
+  resetAgentSession();  // workspace nuevo ⇒ sesión de agente nueva
   closeAllPanels();
 
   const date = fmtDate(p.updated_at || p.timestamp);
@@ -486,6 +631,7 @@ closeDirBtn?.addEventListener('click', closeAllPanels);
 
 function openDirBrowser() {
   projectsPanel?.classList.add('hidden');
+  sessionsPanel?.classList.add('hidden');
   dirBrowser?.classList.remove('hidden');
   panelOverlay?.classList.remove('hidden');
   browseTo(workspace || '~');
@@ -500,11 +646,80 @@ dirSelectBtn?.addEventListener('click', () => {
   workspace = currentBrowsePath;
   localStorage.setItem('deep_workspace', workspace);
   updateWorkspaceLabel();
+  resetAgentSession();  // workspace nuevo ⇒ sesión de agente nueva
   closeAllPanels();
   addMessage('assistant',
     `📂 Workspace: \`${workspace}\`\n\nPodés usar \`build "descripción"\` para crear un proyecto aquí.`);
   inputEl.focus();
 });
+
+// ── Panel de sesiones del daemon (attach en vivo) ───────────────────────────────
+
+sessionsBtn?.addEventListener('click', () => {
+  projectsPanel?.classList.add('hidden');
+  dirBrowser?.classList.add('hidden');
+  sessionsPanel?.classList.remove('hidden');
+  panelOverlay?.classList.remove('hidden');
+  loadSessions();
+});
+
+closeSessionsBtn?.addEventListener('click', closeAllPanels);
+
+async function loadSessions() {
+  sessionsList.innerHTML = '<p class="panel-empty">Cargando...</p>';
+  try {
+    const res = await fetch('/api/sessions', { headers: authHeaders() });
+    if (res.status === 401) { logout(); return; }
+    const data = await res.json();
+    renderSessions(data.sessions);
+  } catch {
+    sessionsList.innerHTML = '<p class="panel-empty">Error al cargar sesiones.</p>';
+  }
+}
+
+function renderSessions(sessions) {
+  if (!sessions.length) {
+    sessionsList.innerHTML = '<p class="panel-empty">No hay sesiones activas en el daemon.<br>' +
+      'Se crean solas la primera vez que usás el modo agente 🤖 (acá o desde la terminal).</p>';
+    return;
+  }
+  sessionsList.innerHTML = '';
+  for (const s of sessions) {
+    const isCurrent = s.id === agentSessionId;
+    const card = document.createElement('div');
+    card.className = 'proj-card' + (isCurrent ? ' session-active' : '');
+    const short = s.id.slice(0, 8);
+    card.innerHTML = `
+      <div class="proj-info">
+        <div class="proj-name">${short}${isCurrent ? ' · actual' : ''}${s.busy ? ' · ⏳ ocupada' : ''}</div>
+        <div class="proj-task">${s.workspace}</div>
+        <div class="proj-meta">modo=${s.mode} · ${s.subscribers} cliente(s) atacheado(s)</div>
+      </div>
+      <div class="proj-actions">
+        <button class="proj-select-btn"${isCurrent ? ' disabled' : ''}>Atachear</button>
+      </div>
+    `;
+    const btn = card.querySelector('.proj-select-btn');
+    if (!isCurrent) {
+      btn.addEventListener('click', async () => {
+        closeSocket();
+        agentSessionId = s.id;
+        localStorage.setItem('deep_agent_session', agentSessionId);
+        workspace = s.workspace;
+        localStorage.setItem('deep_workspace', workspace);
+        updateWorkspaceLabel();
+        agentMode = true;
+        localStorage.setItem('deep_agent', '1');
+        updateAgentBtn();
+        closeAllPanels();
+        messagesEl.innerHTML =
+          `<div class="welcome"><p>Atacheado a la sesión ${short} (${workspace}).</p></div>`;
+        inputEl.focus();
+      });
+    }
+    sessionsList.appendChild(card);
+  }
+}
 
 async function browseTo(path) {
   dirList.innerHTML = '<p class="panel-empty">Cargando...</p>';

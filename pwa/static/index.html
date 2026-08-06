@@ -39,6 +39,7 @@
       <div class="header-actions">
         <button id="agent-btn" title="Modo agente (usa herramientas)">&#129302;</button>
         <button id="install-btn" class="hidden" title="Instalar como app">&#11015;</button>
+        <button id="sessions-btn" title="Sesiones activas del daemon">&#128193;</button>
         <button id="projects-btn" title="Mis proyectos">&#9776;</button>
         <button id="balance-btn" title="Ver crédito">$</button>
         <button id="new-chat-btn" title="Nueva conversación">+</button>
@@ -55,6 +56,17 @@
         <button id="close-panel-btn" class="close-panel-btn">&#10005;</button>
       </div>
       <div id="projects-list" class="panel-body">
+        <p class="panel-empty">Cargando...</p>
+      </div>
+    </div>
+
+    <!-- Panel de sesiones del daemon (attach en vivo) -->
+    <div id="sessions-panel" class="side-panel hidden">
+      <div class="panel-header">
+        <span class="panel-title">Sesiones activas</span>
+        <button id="close-sessions-btn" class="close-panel-btn">&#10005;</button>
+      </div>
+      <div id="sessions-list" class="panel-body">
         <p class="panel-empty">Cargando...</p>
       </div>
     </div>

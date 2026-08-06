@@ -14,6 +14,7 @@ class ToolContext:
     workspace: Path
     on_event: Callable[[str, dict], None] = lambda kind, data: None
     confirm: Callable[[str], bool] = lambda desc: True
+    confirm_plan: Callable[[str], bool] = lambda plan: False  # fail-closed por default
     builder: object = None  # CodeBuilder (FLASH) para generate_code / apply_edit
     spawn: Callable[..., str] = None  # delega una tarea a un sub-agente (spawn_agent)
     explore: Callable[..., str] = None  # investigación read-only delegada a FLASH (explore)

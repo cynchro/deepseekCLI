@@ -537,6 +537,11 @@ def run_doctor() -> None:
     key = os.environ.get("DEEPSEEK_API_KEY") or _load_key()
     print(f"  {'✅' if key else '❌'} API key {'configurada' if key else 'no encontrada  →  deep config set-key'}")
 
+    from core.config import load_daemon_token as _load_daemon_token
+    daemon_token = os.environ.get("DEEP_APP_PASSWORD") or _load_daemon_token()
+    print(f"  {'✅' if daemon_token else 'ℹ️ '} Token de deep serve "
+          f"{'configurado (terminal y PWA lo comparten)' if daemon_token else 'se genera solo la primera vez que uses el agente o corras deep serve'}")
+
     if key:
         try:
             data = bal.fetch(key)
@@ -788,7 +793,13 @@ def run_serve(port: int = 8000, use_https: bool = False, use_tunnel: bool = Fals
     try:
         subprocess.run(
             [sys.executable, "-m", "uvicorn", "main:app",
-             "--host", "0.0.0.0", "--port", str(port)] + ssl_args,
+             "--host", "0.0.0.0", "--port", str(port),
+             # ws-ping-timeout debe superar SessionHub.CONFIRM_TIMEOUT (120s):
+             # mientras el usuario piensa un confirm (write_file, run_command),
+             # el cliente está bloqueado en input(), no en ws.recv(), así que
+             # no responde pongs — un timeout corto tira la conexión abajo
+             # y el turno sigue corriendo server-side sin nadie escuchando.
+             "--ws-ping-interval", "20", "--ws-ping-timeout", "180"] + ssl_args,
             cwd=str(pwa_dir),
             env=env,
         )

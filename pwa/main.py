@@ -1,32 +1,30 @@
+import asyncio
 import contextlib
 import io
 import json
 import logging
 import os
-import queue
 import shutil
 import sys
-import threading
 import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.client import DeepSeekClient
+from core.config import ensure_daemon_token
 from core.rules import load_rules
-from core.agent_loop import AgentLoop
-from core.context import load_project_context
 import core.balance as bal
+from pwa.session_hub import SessionRegistry
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-APP_PASSWORD     = os.environ.get("DEEP_APP_PASSWORD", "")
+APP_PASSWORD     = os.environ.get("DEEP_APP_PASSWORD") or ensure_daemon_token()
 BUILD_DIR        = Path(os.environ.get("DEEP_BUILD_DIR", Path.home() / "deep-projects"))
 
 # ── Logging ────────────────────────────────────────────────────────────────────
@@ -77,9 +75,13 @@ async def log_requests(request: Request, call_next):
 
 
 def _check_auth(authorization: str | None):
-    if APP_PASSWORD and authorization != f"Bearer {APP_PASSWORD}":
+    if authorization != f"Bearer {APP_PASSWORD}":
         log.warning("Auth failed: %s", authorization)
         raise HTTPException(status_code=401, detail="No autorizado")
+
+
+def _valid_token(token: str | None) -> bool:
+    return token == APP_PASSWORD
 
 
 def _get_or_create(session_id: str):
@@ -100,11 +102,6 @@ def _get_or_create(session_id: str):
 class MessageRequest(BaseModel):
     message: str
     session_id: str = ""
-
-class AgentRequest(BaseModel):
-    message: str
-    session_id: str = ""
-    project_dir: str = ""
 
 class RunRequest(BaseModel):
     command: str
@@ -435,95 +432,96 @@ async def run_command(req: RunRequest, authorization: str | None = Header(None))
     return {"output": f"❌ Comando desconocido: `{cmd}`"}
 
 
-# ── Agente (loop con tools, streaming) ──────────────────────────────────────────
+# ── Agente (loop con tools, sesiones compartidas por N clientes) ────────────────
 
-# Permiso remoto: aceptamos escrituras/ediciones; el shell queda BLOQUEADO salvo
-# que se habilite explícitamente con DEEP_REMOTE_SHELL=1 (es la máquina del usuario,
-# pero ejecutar shell desde el celular es sensible).
-REMOTE_SHELL = bool(os.environ.get("DEEP_REMOTE_SHELL", ""))
+REGISTRY = SessionRegistry(DEEPSEEK_API_KEY, BUILD_DIR)
 
 
-def _remote_confirm(desc: str) -> bool:
-    if desc.startswith("ejecutar"):
-        return REMOTE_SHELL
-    return True
-
-
-agent_sessions: dict = {}   # sid -> (AgentLoop, workspace_str)
-
-
-def _get_or_create_agent(session_id: str, project_dir: str):
-    ws = _project_dir(project_dir)
-    ws.mkdir(parents=True, exist_ok=True)
-    sid = session_id or str(uuid.uuid4())
-    existing = agent_sessions.get(sid)
-    if existing and existing[1] == str(ws):
-        return sid, existing[0]
-    client = DeepSeekClient(DEEPSEEK_API_KEY)
-    loop = AgentLoop(
-        client, ws,
-        rules=load_rules(ws / ".deeprules"),
-        project_context=load_project_context(ws),
-        confirm=_remote_confirm,
-    )
-    agent_sessions[sid] = (loop, str(ws))
-    log.info("nuevo agente: session=%s  ws=%s", sid[:8], ws)
-    return sid, loop
-
-
-def _event_payload(kind: str, data: dict) -> dict:
-    """Compacta/trunca el evento para el stream (no mandamos archivos enteros)."""
-    d = dict(data or {})
-    if "result" in d:
-        first = (d["result"].splitlines() or [""])[0]
-        d["result"] = first[:200]
-    if "args" in d:
-        d["args"] = {k: str(v)[:120] for k, v in (d["args"] or {}).items()}
-    if "content" in d and kind == "user":
-        d["content"] = d["content"][:200]
-    return {"type": kind, **d}
-
-
-@app.post("/api/agent")
-async def agent_run(req: AgentRequest, authorization: str | None = Header(None)):
+@app.get("/api/sessions")
+async def list_sessions(authorization: str | None = Header(None)):
     _check_auth(authorization)
-    sid, loop = _get_or_create_agent(req.session_id, req.project_dir)
-    log.info("agent: session=%s  msg=%s  ws=%s", sid[:8], req.message[:80], loop.workspace)
+    return {"sessions": [
+        {"id": h.id, "workspace": h.workspace, "mode": h.permissions.mode,
+         "model": h.loop.model, "created_at": h.created_at, "last_active": h.last_active,
+         "busy": h.busy, "subscribers": len(h.subscribers)}
+        for h in REGISTRY.list()
+    ]}
 
-    q: queue.Queue = queue.Queue()
 
-    def on_event(kind, data):
-        q.put(_event_payload(kind, data))
+@app.websocket("/ws/session")
+async def ws_session(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        first = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+    except Exception:
+        await websocket.close(code=4401)
+        return
+    if first.get("type") != "auth" or not _valid_token(first.get("token")):
+        await websocket.close(code=4401)
+        return
 
-    # rebind de eventos a esta request (el agente persiste entre llamadas)
-    loop.on_event = on_event
-    loop.ctx.on_event = on_event
+    main_loop = asyncio.get_running_loop()
+    hub = None
 
-    def worker():
-        try:
-            res = loop.run(req.message)
-            q.put({"type": "done", "session_id": sid,
-                   "success": res.get("success", False),
-                   "content": res.get("content", ""),
-                   "stats": res.get("stats", {})})
-        except Exception as e:
-            log.error("agent ERROR: %s", e, exc_info=True)
-            q.put({"type": "fatal", "error": str(e)})
-        finally:
-            q.put(None)
+    def subscriber(payload: dict):
+        async def _send():
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                pass
+        asyncio.run_coroutine_threadsafe(_send(), main_loop)
 
-    threading.Thread(target=worker, daemon=True).start()
-
-    def stream():
-        yield f"data: {json.dumps({'type': 'start', 'session_id': sid})}\n\n"
+    try:
         while True:
-            item = q.get()
-            if item is None:
-                break
-            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+            msg = await websocket.receive_json()
+            mtype = msg.get("type")
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+            if mtype == "attach":
+                if hub is not None:
+                    hub.unsubscribe(subscriber)
+                hub = REGISTRY.get_or_create(
+                    msg.get("session_id") or "", _project_dir(msg.get("project_dir") or ""),
+                    mode=msg.get("mode") or "ask", model=msg.get("model") or None)
+                hub.subscribe(subscriber)
+                await websocket.send_json({
+                    "type": "attached", "session_id": hub.id, "workspace": hub.workspace,
+                    "mode": hub.permissions.mode, "model": hub.loop.model, "busy": hub.busy,
+                })
+                continue
+
+            if hub is None:
+                await websocket.send_json({"type": "error", "error": "no hay sesión atacheada"})
+                continue
+
+            if mtype == "message":
+                hub.run_turn_async(msg.get("text", ""))
+            elif mtype == "confirm_response":
+                hub.resolve_confirm(msg.get("request_id", ""), msg.get("answer", ""))
+            elif mtype == "set_mode":
+                hub.permissions.set_mode(msg.get("mode", hub.permissions.mode))
+            elif mtype == "set_model":
+                hub.loop.model = msg.get("model", hub.loop.model)
+                hub.broadcast({"type": "model_changed", "model": hub.loop.model})
+            elif mtype == "reset":
+                if not hub.try_start_turn():
+                    await websocket.send_json({"type": "busy", "reason": "turn_in_progress"})
+                else:
+                    try:
+                        hub.loop.reset()
+                    finally:
+                        hub.finish_turn()
+            elif mtype == "get_stats":
+                await websocket.send_json({"type": "stats", **hub.get_stats()})
+            elif mtype == "finalize":
+                await main_loop.run_in_executor(None, hub.finalize)
+                await websocket.send_json({"type": "finalized"})
+            else:
+                await websocket.send_json({"type": "error", "error": f"tipo desconocido: {mtype}"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if hub is not None:
+            hub.unsubscribe(subscriber)
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

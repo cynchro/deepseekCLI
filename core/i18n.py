@@ -377,8 +377,8 @@ _MODE_HELP = {
         "en": "accepts file edits; asks for shell",
     },
     "plan": {
-        "es": "solo lectura: bloquea escrituras y shell",
-        "en": "read-only: blocks writes and shell",
+        "es": "solo lectura: investiga y propone un plan para aprobar antes de ejecutar",
+        "en": "read-only: investigates and proposes a plan to approve before executing",
     },
     "yolo": {
         "es": "acepta todo sin preguntar",

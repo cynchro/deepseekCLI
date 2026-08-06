@@ -519,6 +519,7 @@ header {
   transition: opacity 0.15s;
 }
 .proj-select-btn:active { opacity: 0.75; }
+.proj-select-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .proj-delete-btn {
   background: none;
@@ -620,4 +621,49 @@ header {
   padding: 2px 7px;
   border-radius: 10px;
   flex-shrink: 0;
+}
+
+/* ── Sesión activa en el panel de sesiones ──────────────────────────────── */
+
+.proj-card.session-active {
+  border-color: var(--accent);
+  background: rgba(0, 204, 68, 0.06);
+}
+
+/* ── Confirmación de permisos (attach en vivo, respuesta al daemon) ────── */
+
+.confirm-prompt { border: 1px solid var(--accent); }
+.confirm-prompt.confirm-answered { opacity: 0.6; }
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.confirm-btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: none;
+  color: var(--text);
+  transition: opacity 0.15s, border-color 0.15s;
+}
+.confirm-btn:active { opacity: 0.75; }
+
+.confirm-yes { background: var(--accent); color: #000; border-color: var(--accent); }
+.confirm-no { border-color: #ff4455; color: #ff4455; }
+.confirm-always { color: var(--muted); }
+
+/* ── Plan propuesto (exit_plan_mode, modo plan) ──────────────────────────── */
+
+.plan-proposal { border: 1px solid var(--accent); background: rgba(0, 204, 68, 0.06); }
+
+.plan-header {
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 8px;
 }

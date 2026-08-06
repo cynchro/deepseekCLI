@@ -26,6 +26,23 @@ from core.tools.base import ToolContext
 # Investigador read-only (FLASH): solo lee, nunca escribe ni ejecuta.
 _EXPLORE_READONLY = {"read_file", "grep", "list_dir", "glob", "search_code"}
 
+# Tools con efecto secundario que el modo plan bloquea a NIVEL DE SCHEMA (el
+# modelo ni las ve): el gate real sigue siendo ctx.confirm/ctx.confirm_plan,
+# esto es además, para no tentar al modelo a intentarlas y recibir "CANCELADO".
+_PLAN_BLOCKED_TOOLS = {
+    "write_file", "edit_file", "generate_code", "apply_edit", "run_command",
+    "write_tasks", "update_task", "spawn_agent",
+    "browser_click", "browser_type", "browser_eval", "browser_screenshot",
+}
+
+_PLAN_MODE_DIRECTIVE = """[MODO PLAN activo] Solo podés leer/investigar (read_file, grep,
+list_dir, glob, search_code, explore, navegador de solo lectura). NO tenés escritura ni
+ejecución — esas tools ni te aparecen. Investigá lo necesario y, en vez de aplicar el cambio,
+llamá a exit_plan_mode con tu plan de implementación COMPLETO en markdown (archivos a tocar/
+crear, en qué orden, riesgos/decisiones). Si el usuario lo aprueba, el modo cambia solo y
+seguís ejecutando el plan en este mismo turno. Si lo rechaza, seguís en modo plan: ajustá la
+propuesta según lo que te diga y volvé a llamar exit_plan_mode."""
+
 EXPLORE_SYSTEM = """Sos un investigador de código de solo lectura. Otro agente te hace
 una pregunta sobre este proyecto y vos la respondés explorando el workspace.
 
@@ -47,6 +64,16 @@ breve de contexto: qué entendiste del pedido y qué vas a hacer. Si el usuario 
 stack trace o salida de un comando (p.ej. un build que falló), esa línea tiene que nombrar
 el error real que identificaste ahí adentro (no "voy a revisar el log": decí CUÁL es el
 error). Esto no es pedir permiso — es una frase de contexto y seguís directo a actuar.
+
+# No repitas trabajo ya hecho
+Un pedido puede incluir algo que ya resolviste antes (en esta misma conversación o en una
+sesión anterior, vía la bitácora de abajo si la hay). Esto es común en pedidos compuestos:
+"verificá el login y agregale recuperar contraseña" cuando el login ya se verificó en un turno
+previo. Para la parte ya hecha: NO la rehagas desde cero. Confirmá su estado con una
+verificación rápida y puntual (releer el resultado que ya tenés, o un grep/read_file/test
+concreto si hace falta refrescarlo) y decilo en una frase corta ("el login ya está verificado,
+sigo con recuperar contraseña"). Dedicá el trabajo real — exploración, escritura, tests — a la
+parte NUEVA del pedido.
 
 # Cómo escribís código
 VOS escribís el código. Sos el modelo más capaz del sistema: no delegues la parte
@@ -166,15 +193,23 @@ class AgentLoop:
                  rules: List[str] = None, project_context: str = None,
                  on_event: Callable[[str, dict], None] = None,
                  confirm: Callable[[str], bool] = None,
+                 confirm_plan: Callable[[str], bool] = None,
+                 mode: str = "ask", get_mode: Callable[[], str] = None,
                  max_steps: int = 100, compact_threshold: int = 150000,
                  depth: int = 0, max_depth: int = 2, is_subagent: bool = False,
                  auto_verify: bool = True, parallel_subagents: bool = True,
                  max_parallel: int = 4, max_auto_resume: int = 3):
         self.client = client
         self.model = model
+        self._static_mode = mode if mode in ("ask", "auto", "plan", "yolo") else "ask"
+        # get_mode permite leer el modo EN VIVO (p.ej. Permissions.mode): /mode puede
+        # cambiarlo a mitad de sesión sin recrear el AgentLoop.
+        self._get_mode = get_mode or (lambda: self._static_mode)
         self.auto_verify = auto_verify
         self.max_auto_resume = max_auto_resume
         self._verify_attempts = 0
+        self._plan_tool_called = False
+        self._plan_reinject_attempts = 0
         self.parallel_subagents = parallel_subagents
         self.max_parallel = max_parallel
         # Serializa los pedidos de permiso cuando varios sub-agentes corren en paralelo,
@@ -203,6 +238,7 @@ class AgentLoop:
             workspace=self.workspace,
             on_event=self.on_event,
             confirm=confirm or (lambda desc: True),
+            confirm_plan=confirm_plan or (lambda plan: False),
             builder=self.builder,
             spawn=self._spawn_subagent,
             explore=self._explore,
@@ -211,7 +247,7 @@ class AgentLoop:
         # y no anidan más allá de max_depth.
         self.tools_exclude = set()
         if is_subagent:
-            self.tools_exclude |= {"write_tasks", "update_task"}
+            self.tools_exclude |= {"write_tasks", "update_task", "exit_plan_mode"}
         if depth >= max_depth:
             self.tools_exclude |= {"spawn_agent", "explore"}
 
@@ -376,6 +412,9 @@ class AgentLoop:
         return (f"VERIFICACIÓN AUTOMÁTICA: `{cmd}` falló (exit={exit_code}). "
                 f"No declares terminado: arreglá el código hasta dejarlo en verde.\n{out}")
 
+    def current_mode(self) -> str:
+        return self._get_mode()
+
     def reset(self):
         """Reinicia la conversación preservando el system prompt."""
         self.messages = self.messages[:1]
@@ -417,11 +456,18 @@ class AgentLoop:
 
     def run(self, user_input: str) -> dict:
         """Procesa un turno del usuario hasta la respuesta final (sin tool calls)."""
-        self.messages.append({"role": "user", "content": user_input})
+        # El evento que ven terminal/PWA lleva el texto ORIGINAL; solo lo que ve el
+        # modelo lleva la directiva de modo plan (si aplica), para no romper la UI.
+        model_input = user_input
+        if self.current_mode() == "plan" and not self.is_subagent:
+            model_input = _PLAN_MODE_DIRECTIVE + "\n\n---\n\n" + user_input
+        self.messages.append({"role": "user", "content": model_input})
         self.on_event("user", {"content": user_input})
         _dbg.log("AGENT", f"run  task={user_input[:120]}  model={self.model}")
         self._touched = set()
         self._verify_attempts = 0
+        self._plan_tool_called = False
+        self._plan_reinject_attempts = 0
         resumes = 0
         while True:
             res = self._run_steps()
@@ -447,9 +493,14 @@ class AgentLoop:
 
         for step in range(self.max_steps):
             self._compact_if_needed()   # también a mitad de un build largo
+            mode = self.current_mode()
+            # Dinámico por paso: si exit_plan_mode aprueba el plan a mitad de este mismo
+            # loop, el modo cambia y el paso SIGUIENTE ya ofrece las tools de escritura.
+            exclude = self.tools_exclude | (
+                _PLAN_BLOCKED_TOOLS if mode == "plan" else {"exit_plan_mode"})
             resp = self.client.complete(
                 self.messages, model=self.model,
-                tools=schemas(exclude=self.tools_exclude),
+                tools=schemas(exclude=exclude),
                 temperature=0.3, max_tokens=8000,
             )
             if not resp.get("success"):
@@ -529,6 +580,8 @@ class AgentLoop:
                     result = dispatch(name, args, self.ctx)
                     if name in _WRITE_TOOLS and result.startswith("OK") and args.get("path"):
                         self._touched.add(args["path"])
+                    if name == "exit_plan_mode":
+                        self._plan_tool_called = True
                     self.on_event("tool_result", {"name": name, "result": result})
                     results[tc["id"]] = result
 
@@ -543,6 +596,22 @@ class AgentLoop:
 
             # respuesta final (sin tool calls): antes de cerrar, verificación automática
             content = resp.get("content", "")
+            # Red de seguridad de modo plan: el modelo a veces "propone" el plan como texto
+            # libre en vez de llamar a exit_plan_mode (rompe el flujo de aprobación — el
+            # usuario nunca ve el prompt de sí/no). Un solo reintento forzando la tool; si
+            # sigue sin usarla (p.ej. era una pregunta puramente informativa), se deja pasar.
+            if (self.current_mode() == "plan" and not self.is_subagent
+                    and not self._plan_tool_called and self._plan_reinject_attempts < 1):
+                self._plan_reinject_attempts += 1
+                self.on_event("plan_reinject", {"attempt": self._plan_reinject_attempts})
+                self.messages.append({"role": "user", "content": (
+                    "Seguís en modo plan y no llamaste a exit_plan_mode. Si tu respuesta "
+                    "anterior proponía crear o modificar algo, llamá a exit_plan_mode con ESE "
+                    "plan completo en markdown — es la única forma de que el usuario lo "
+                    "apruebe y pase a ejecución; escribirlo como texto no alcanza. Si en "
+                    "cambio tu respuesta era puramente informativa (no implica ningún cambio "
+                    "de código), podés responder en texto normalmente.")})
+                continue
             verify_fail = self._auto_verify()
             if verify_fail:
                 self.on_event("verify_reinject", {"attempt": self._verify_attempts})

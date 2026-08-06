@@ -45,6 +45,38 @@ def save_api_key(key: str) -> None:
     _CONFIG_FILE.chmod(0o600)
 
 
+def load_daemon_token() -> str | None:
+    try:
+        return json.loads(_CONFIG_FILE.read_text()).get("daemon_token") or None
+    except Exception:
+        return None
+
+
+def save_daemon_token(token: str) -> None:
+    _CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    existing = {}
+    try:
+        existing = json.loads(_CONFIG_FILE.read_text())
+    except Exception:
+        pass
+    existing["daemon_token"] = token
+    _CONFIG_FILE.write_text(json.dumps(existing, indent=2))
+    _CONFIG_FILE.chmod(0o600)
+
+
+def ensure_daemon_token() -> str:
+    """Token compartido por terminal/PWA para autenticarse contra `deep serve`.
+    Se genera una sola vez y se persiste; evita depender de una env var que
+    hay que recordar setear en cada arranque."""
+    token = load_daemon_token()
+    if token:
+        return token
+    import secrets
+    token = secrets.token_urlsafe(24)
+    save_daemon_token(token)
+    return token
+
+
 def load_language() -> str | None:
     """Returns stored language code, or None if never configured."""
     try:
