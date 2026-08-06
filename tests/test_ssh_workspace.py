@@ -304,55 +304,83 @@ class _FakeConnBrowse:
         return path in self.tree
 
 
-def test_browse_pick_by_number_then_confirm(monkeypatch):
+pytest.importorskip("prompt_toolkit")
+
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+_DOWN = "\x1b[B"
+_UP = "\x1b[A"
+_ENTER = "\r"
+_SPACE = " "
+_ESCAPE = "\x1b"
+
+
+def _run_browse(conn, keys: str, start=None):
+    with create_pipe_input() as pipe_input:
+        with create_app_session(input=pipe_input, output=DummyOutput()):
+            pipe_input.send_text(keys)
+            return sw.browse_remote_directory(conn, start=start)
+
+
+def test_browse_select_home_immediately():
+    conn = _FakeConnBrowse({"/home/user": ["proj1", "proj2"]})
+    assert _run_browse(conn, _SPACE) == "/home/user"
+
+
+def test_browse_down_into_dir_then_confirm():
     tree = {"/home/user": ["proj1", "proj2"], "/home/user/proj1": []}
     conn = _FakeConnBrowse(tree)
-    inputs = iter(["1", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/home/user/proj1"
+    # ".." está primero; un DOWN cae en "proj1", Enter entra, Space elige.
+    assert _run_browse(conn, _DOWN + _ENTER + _SPACE) == "/home/user/proj1"
 
 
-def test_browse_up_navigation(monkeypatch):
+def test_browse_up_navigation():
     tree = {"/home/user": ["proj1"], "/home/user/proj1": ["src"],
             "/home/user/proj1/src": []}
     conn = _FakeConnBrowse(tree)
-    inputs = iter(["1", "1", "..", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/home/user/proj1"
+    keys = (_DOWN + _ENTER      # entra a proj1
+            + _DOWN + _ENTER    # entra a src
+            + _ENTER            # ".." vuelve a proj1
+            + _SPACE)           # elige proj1
+    assert _run_browse(conn, keys) == "/home/user/proj1"
 
 
-def test_browse_absolute_path_direct(monkeypatch):
-    tree = {"/home/user": [], "/var/www/app": []}
+def test_browse_up_arrow_wraps_to_last_entry():
+    tree = {"/home/user": ["proj1", "proj2"]}
     conn = _FakeConnBrowse(tree)
-    inputs = iter(["/var/www/app", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/var/www/app"
+    # UP desde el índice 0 (".. ") da la vuelta a la última entrada (proj2).
+    assert _run_browse(conn, _UP + _ENTER + _SPACE) == "/home/user/proj2"
 
 
-def test_browse_folder_name_typed_directly(monkeypatch):
-    tree = {"/home/user": ["proj1"], "/home/user/proj1": []}
-    conn = _FakeConnBrowse(tree)
-    inputs = iter(["proj1", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/home/user/proj1"
-
-
-def test_browse_invalid_name_reprompts(monkeypatch):
-    tree = {"/home/user": ["proj1"], "/home/user/proj1": []}
-    conn = _FakeConnBrowse(tree)
-    inputs = iter(["no-existe", "1", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/home/user/proj1"
-
-
-def test_browse_cancel_on_eof(monkeypatch):
+def test_browse_cancel_on_escape():
     conn = _FakeConnBrowse({"/home/user": []})
+    assert _run_browse(conn, _ESCAPE) is None
 
-    def _raise(prompt=""):
-        raise EOFError()
 
-    monkeypatch.setattr("builtins.input", _raise)
-    assert sw.browse_remote_directory(conn) is None
+def test_browse_cancel_on_ctrl_c():
+    conn = _FakeConnBrowse({"/home/user": []})
+    assert _run_browse(conn, "\x03") is None
+
+
+def test_browse_starts_at_given_start_path():
+    tree = {"/home/user": ["proj1"], "/home/user/proj1": []}
+    conn = _FakeConnBrowse(tree)
+    assert _run_browse(conn, _SPACE, start="/home/user/proj1") == "/home/user/proj1"
+
+
+def test_browse_shows_error_and_keeps_navigable_on_permission_denied():
+    class _Denying(_FakeConnBrowse):
+        def listdir_dirs(self, path):
+            if path == "/home/user/locked":
+                raise PermissionError("denegado")
+            return super().listdir_dirs(path)
+
+    tree = {"/home/user": ["locked"], "/home/user/locked": ["secret"]}
+    conn = _Denying(tree)
+    # Entra a "locked" (falla el listado, pero no debe crashear) y elige igual.
+    assert _run_browse(conn, _DOWN + _ENTER + _SPACE) == "/home/user/locked"
 
 
 # ── resolve_remote_workspace: rutas dadas vs. picker interactivo ────────────
@@ -756,9 +784,14 @@ def test_resolve_remote_workspace_accepts_native_windows_path(monkeypatch):
     assert str(ws) == "/C:/Users/alexis/proyecto"
 
 
-def test_browse_accepts_native_windows_path_typed_directly(monkeypatch):
-    tree = {"/C:/Users/alexis": [], "/D:/proyectos/app": []}
-    conn = _FakeConnBrowse(tree, home="/C:/Users/alexis")
-    inputs = iter(["D:\\proyectos\\app", ""])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
-    assert sw.browse_remote_directory(conn) == "/D:/proyectos/app"
+def test_browse_navigates_native_windows_drive_paths_with_arrows():
+    # Las unidades Windows son, para el picker, subdirectorios posix normales
+    # ("/C:", "/D:") — la navegación con flechas no necesita tratamiento especial.
+    tree = {"/": ["C:", "D:"], "/D:": ["proyectos"], "/D:/proyectos": ["app"],
+            "/D:/proyectos/app": []}
+    conn = _FakeConnBrowse(tree, home="/")
+    keys = (_DOWN + _DOWN + _ENTER   # ".." , "C:/" , "D:/" -> entra a "D:"
+            + _DOWN + _ENTER         # ".." , "proyectos/" -> entra a "proyectos"
+            + _DOWN + _ENTER         # ".." , "app/" -> entra a "app"
+            + _SPACE)                # elige
+    assert _run_browse(conn, keys) == "/D:/proyectos/app"

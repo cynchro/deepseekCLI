@@ -326,6 +326,12 @@ _STRINGS = {
         "es": "  '{choice}' no es una carpeta accesible acá.",
         "en": "  '{choice}' is not an accessible folder here.",
     },
+    "remote.browse.up_entry": {"es": ".. (subir)", "en": ".. (up)"},
+    "remote.browse.picker_hint": {
+        "es": "↑↓ mover · Enter entrar/subir · Espacio elegir esta carpeta · Esc cancela",
+        "en": "↑↓ move · Enter open/up · Space select this folder · Esc cancel",
+    },
+    "remote.browse.error": {"es": "  ⚠ {error}", "en": "  ⚠ {error}"},
     "remote.windows.detected": {
         "es": "  📡 Windows detectado — home remoto: {home}",
         "en": "  📡 Windows detected — remote home: {home}",

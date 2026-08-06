@@ -32,6 +32,17 @@ try:
 except ImportError:
     paramiko = None
 
+try:
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout import Layout
+    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.styles import Style
+    _HAS_PT = True
+except ImportError:
+    _HAS_PT = False
+
 _HEARTBEAT_INTERVAL = 15
 _LIST_CACHE_TTL = 5
 _HOST_SPEC_RE = re.compile(r"^(?:([^@]+)@)?([^:@]+)(?::(\d+))?$")
@@ -611,11 +622,14 @@ class RemoteBrowseCancelled(Exception):
     """El usuario canceló el picker interactivo de carpeta remota (Ctrl-C/Ctrl-D)."""
 
 
-def browse_remote_directory(conn: SSHConnection, start: str = None):
-    """Picker interactivo por texto: lista subdirectorios y deja navegar hasta
-    elegir la carpeta del proyecto, sin tener que conocer de antemano la ruta
-    absoluta. Arranca en `start` (o el home remoto si no se pasa). Devuelve la
-    ruta absoluta elegida, o None si el usuario canceló (Ctrl-C/Ctrl-D)."""
+_BROWSE_STYLE = None
+if _HAS_PT:
+    _BROWSE_STYLE = Style.from_dict({"selected": "reverse", "hint": "#00cc44 bold", "error": "#cc4444"})
+
+
+def _browse_remote_directory_text(conn: SSHConnection, start: str = None):
+    """Picker por texto (fallback si prompt_toolkit no está disponible): lista
+    subdirectorios y deja navegar tipeando un número, "..", o una ruta."""
     cur = start or conn.home_dir()
     while True:
         dirs = conn.listdir_dirs(cur)
@@ -642,6 +656,89 @@ def browse_remote_directory(conn: SSHConnection, start: str = None):
             cur = candidate
         else:
             print(t("remote.browse.invalid", choice=choice))
+
+
+def browse_remote_directory(conn: SSHConnection, start: str = None):
+    """Picker interactivo con flechas (↑↓ mover, Enter entra a la carpeta
+    seleccionada o sube con ".." , Espacio elige la carpeta ACTUAL, Esc/Ctrl-C
+    cancela) — mismo patrón que `cli/agent_repl.py::_pick_mode`. Arranca en
+    `start` (o el home remoto si no se pasa). Devuelve la ruta absoluta
+    elegida, o None si el usuario canceló. Cae al picker de texto plano si
+    prompt_toolkit no está instalado."""
+    if not _HAS_PT:
+        return _browse_remote_directory_text(conn, start)
+
+    state = {"cur": start or conn.home_dir(), "idx": 0, "dirs": [], "error": None}
+    result = {"path": None}
+
+    def _refresh():
+        """Recarga state['dirs'] para el directorio actual — un solo roundtrip
+        SFTP por navegación, no por tecla (up/down solo mueven el índice)."""
+        try:
+            state["dirs"] = conn.listdir_dirs(state["cur"])
+            state["error"] = None
+        except (IOError, OSError) as e:
+            state["dirs"] = []
+            state["error"] = str(e)
+        state["idx"] = 0
+
+    _refresh()
+
+    def get_text():
+        entries = [t("remote.browse.up_entry")] + [d + "/" for d in state["dirs"]]
+        lines = [("", "\n"), ("", t("remote.browse.header", path=state["cur"])), ("", "\n\n")]
+        if state["error"]:
+            lines.append(("class:error", t("remote.browse.error", error=state["error"])))
+            lines.append(("", "\n\n"))
+        for i, entry in enumerate(entries):
+            is_sel = i == state["idx"]
+            marker = "❯ " if is_sel else "  "
+            style = "class:selected" if is_sel else ""
+            lines.append((style, f"  {marker}{entry}\n"))
+        lines.append(("", "\n  "))
+        lines.append(("class:hint", t("remote.browse.picker_hint")))
+        lines.append(("", "\n"))
+        return lines
+
+    kb = KeyBindings()
+
+    @kb.add("up")
+    def _up(event):
+        state["idx"] = (state["idx"] - 1) % (len(state["dirs"]) + 1)
+        event.app.invalidate()
+
+    @kb.add("down")
+    def _down(event):
+        state["idx"] = (state["idx"] + 1) % (len(state["dirs"]) + 1)
+        event.app.invalidate()
+
+    @kb.add("enter")
+    def _enter(event):
+        if state["idx"] == 0:
+            state["cur"] = str(PurePosixPath(state["cur"]).parent)
+        else:
+            chosen = state["dirs"][state["idx"] - 1]
+            state["cur"] = posixpath.join(state["cur"].rstrip("/") or "/", chosen)
+        _refresh()
+        event.app.invalidate()
+
+    @kb.add(" ")
+    def _select(event):
+        result["path"] = state["cur"]
+        event.app.exit()
+
+    @kb.add("escape")
+    @kb.add("c-c")
+    def _cancel(event):
+        event.app.exit()
+
+    control = FormattedTextControl(get_text, focusable=True)
+    app = Application(
+        layout=Layout(Window(content=control, always_hide_cursor=True)),
+        key_bindings=kb, style=_BROWSE_STYLE, full_screen=False,
+    )
+    app.run()
+    return result["path"]
 
 
 def resolve_remote_workspace(host_spec: str, remote_path: str = None) -> SSHPath:
