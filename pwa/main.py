@@ -22,6 +22,7 @@ from core.config import ensure_daemon_token
 from core.rules import load_rules
 import core.balance as bal
 from pwa.session_hub import SessionRegistry
+from pwa.browser_bridge import BRIDGE
 
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 APP_PASSWORD     = os.environ.get("DEEP_APP_PASSWORD") or ensure_daemon_token()
@@ -522,6 +523,32 @@ async def ws_session(websocket: WebSocket):
     finally:
         if hub is not None:
             hub.unsubscribe(subscriber)
+
+
+@app.websocket("/ws/browser-bridge")
+async def ws_browser_bridge(websocket: WebSocket):
+    """Conectada por `chrome_bridge/native_host.py` (lanzado por Chrome vía
+    Native Messaging cuando la extensión arranca) — nunca por un cliente
+    humano. Ver `pwa/browser_bridge.py` para el puente sync↔async hacia
+    `core/tools/browser.py::_ExtensionDriver`."""
+    await websocket.accept()
+    try:
+        first = await asyncio.wait_for(websocket.receive_json(), timeout=5)
+    except Exception:
+        await websocket.close(code=4401)
+        return
+    if first.get("type") != "auth" or not _valid_token(first.get("token")):
+        await websocket.close(code=4401)
+        return
+
+    await BRIDGE.on_connect(websocket, asyncio.get_running_loop())
+    try:
+        while True:
+            await BRIDGE.on_message(await websocket.receive_json())
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await BRIDGE.on_disconnect()
 
 
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="static")

@@ -329,6 +329,24 @@ def _legacy(argv: list):
 
     p_cfg.set_defaults(func=do_config)
 
+    # ── browser ──────────────────────────────────────────────────────────────
+    p_browser = sub.add_parser(
+        "browser", help="Backend alternativo de navegador (extensión Chrome real)")
+    p_browser_sub = p_browser.add_subparsers(dest="browser_cmd", metavar="opción")
+    p_install = p_browser_sub.add_parser(
+        "install-extension",
+        help="Registra el native host y muestra cómo cargar la extensión")
+    p_install.add_argument("--port", type=int, default=8000, metavar="PUERTO")
+
+    def do_browser(args):
+        from cli.commands import run_browser_install_extension
+        if getattr(args, "browser_cmd", None) == "install-extension":
+            run_browser_install_extension(port=args.port)
+        else:
+            p_browser.print_help()
+
+    p_browser.set_defaults(func=do_browser)
+
     args = parser.parse_args(argv)
     args.func(args)
 

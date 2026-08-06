@@ -53,7 +53,8 @@ deep = "deep:main"
 py-modules = ["deep"]
 
 [tool.setuptools.packages.find]
-include = ["cli*", "core*", "pwa*"]
+include = ["cli*", "core*", "pwa*", "chrome_bridge*"]
 
 [tool.setuptools.package-data]
 pwa = ["static/*"]
+chrome_bridge = ["extension/**/*"]

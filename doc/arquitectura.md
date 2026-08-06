@@ -83,10 +83,15 @@ deepseekcli/
 │       ├── subagent.py      #     spawn_agent
 │       └── explore.py       #     explore (investigación read-only delegada a FLASH)
 ├── pwa/                     # Daemon de sesiones (deep serve) + PWA (acceso desde el celular)
-│   ├── main.py              #   FastAPI + WebSocket (/ws/session), endpoints REST
+│   ├── main.py              #   FastAPI + WebSocket (/ws/session, /ws/browser-bridge), endpoints REST
 │   ├── session_hub.py       #   SessionHub/SessionRegistry: AgentLoop compartido, fan-out, confirm round-trip
+│   ├── browser_bridge.py    #   BrowserBridge: puente sync↔async hacia la extensión de Chrome
 │   ├── generate_icons.py    #   Generación de íconos PWA
 │   └── static/              #   Frontend: HTML, JS, CSS, manifest, service worker
+├── chrome_bridge/           # Extensión de Chrome + native host (control del navegador real)
+│   ├── install.py           #   Detección de navegadores + registro del Native Messaging Host
+│   ├── native_host.py       #   Relay puro stdio↔WebSocket, lanzado por Chrome
+│   └── extension/           #   Manifest V3 (permiso `debugger`) + service worker
 ├── tests/                   # Tests unitarios
 ├── examples/skills/         # Skills de ejemplo (reviewer, security, docs, refactor, explainer)
 └── projects/                # Directorio de salida por defecto para builds
@@ -393,6 +398,36 @@ el backend de la PWA — ambos son clientes del mismo proceso:
 - **Frontend PWA**: `pwa/static/` — HTML+JS+CSS vanilla, instalable como app nativa en el celular,
   con panel de sesiones y confirmación de permisos por botones.
 - **HTTPS**: `deep serve --https` genera certificados autofirmados con `trustme` para instalar la PWA.
+
+### 11.4 Extensión de Chrome (control del navegador real)
+
+`core/tools/browser.py` (`browser_navigate`, `browser_click`, etc.) elige backend en runtime,
+en orden: **extensión de Chrome conectada** → si no, la cadena Playwright/CDP de siempre
+(`DEEPSEEK_CDP_URL` → puerto 9222 por defecto → Chromium propio visible). Los 8 nombres de tool
+no cambian — la elección es transparente al modelo.
+
+La extensión (`chrome_bridge/extension/`, Manifest V3, permiso `debugger`) es el único backend
+que puede tocar el **perfil real del usuario** (cookies, sesión logueada): Chrome moderno
+(M136+) bloquea el puerto CDP remoto en el perfil default por seguridad, pero sí permite que una
+extensión instalada con permiso `debugger` otorgado explícitamente use `chrome.debugger` desde
+adentro — mismo mecanismo que usa la extensión oficial "Claude in Chrome". Cadena completa:
+
+```
+extensión (chrome.debugger, perfil real)
+  → Native Messaging (stdio) → chrome_bridge/native_host.py (relay puro)
+  → WebSocket → pwa/main.py:/ws/browser-bridge → pwa/browser_bridge.py (BrowserBridge)
+  → core/tools/browser.py::_ExtensionDriver (CDP crudo: Page.navigate, Runtime.evaluate, ...)
+```
+
+`BrowserBridge` resuelve el cruce sync↔async (el driver corre en el thread del turno del
+agente; la conexión WS vive en el event loop de uvicorn) con el mismo patrón que ya usa
+`SessionHub._pending_confirms`: un dict `id -> (threading.Event, slot)` más
+`asyncio.run_coroutine_threadsafe` para mandar el pedido.
+
+Instalación: `deep browser install-extension [--port]` detecta navegadores Chromium instalados
+y registra el manifest de Native Messaging Host (`~/.config/<navegador>/NativeMessagingHosts/`)
+más un launcher ejecutable; la extensión en sí se carga una vez como "descomprimida" en
+`chrome://extensions` (no está publicada en la Chrome Web Store).
 
 ---
 

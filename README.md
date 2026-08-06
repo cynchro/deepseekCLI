@@ -305,6 +305,7 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | `generate_code` / `apply_edit` | Generación/edición **delegada a FLASH** — excepción, para volumen mecánico de bajo riesgo (boilerplate, scaffolding). `apply_edit` usa bloques SEARCH/REPLACE quirúrgicos. |
 | `write_tasks` / `update_task` | Lista de tareas persistente (`.deep/tasks.json`) para trabajos largos. |
 | `spawn_agent` | Delega una parte grande y autocontenida a un sub-agente con contexto fresco. |
+| `browser_navigate` / `browser_click` / `browser_type` / `browser_eval` / ... | Control de un navegador real para debugging/scraping de frontend — con la extensión de Chrome instalada (ver "Navegador" más abajo), es TU Chrome, con tu sesión logueada. |
 | `exit_plan_mode` | **Solo en modo `plan`.** Presenta el plan propuesto y pide aprobación explícita antes de pasar a ejecución (ver "Permisos / modos" más abajo). |
 
 ### Lo que lo acerca a Claude Code
@@ -482,6 +483,33 @@ de Claude Code, pero con `deep`.
 Esto reemplaza como funciona `deep serve` de puertas para adentro: sigue siendo el mismo comando,
 pero ahora expone las sesiones por WebSocket (`/ws/session`) en vez del streaming SSE viejo, y
 terminal + PWA son dos clientes iguales del mismo daemon.
+
+## Navegador: control de un Chrome real (extensión de Chrome)
+
+Las tools `browser_navigate` / `browser_click` / `browser_type` / `browser_eval` /
+`browser_read_page` / `browser_console` / `browser_network` / `browser_screenshot` /
+`browser_close` le dan al agente un navegador de verdad para debugging y scraping de frontend.
+Por defecto controla un Chromium propio y **visible** (lanzado al vuelo, sin tu sesión
+logueada) — para que use TU Chrome real, con tus cookies y sesiones activas, instalá la
+extensión:
+
+```bash
+deep browser install-extension
+```
+
+Esto registra el Native Messaging Host en los navegadores Chromium que detecte
+(`google-chrome`, `chromium`, `brave`, `edge`, `opera`, `vivaldi`) y te muestra la ruta para
+cargar la extensión "descomprimida" en `chrome://extensions` (no está publicada en la Chrome
+Web Store — es un paso manual, una sola vez por navegador). Una vez conectada, el agente la
+prioriza automáticamente sobre cualquier otro backend, sin que tengas que configurar nada más:
+navega en tu ventana real, con el mismo permiso `debugger` que usa "Claude in Chrome" para
+lograr lo mismo, y muestra un cursor visual (un punto que se desliza y pulsa) antes de cada
+click/tipeo, para que veas en vivo qué está por tocar. `browser_close` solo desadjunta el
+debugger — nunca cierra tu ventana.
+
+Si no instalás la extensión, sigue funcionando el fallback anterior: `DEEPSEEK_CDP_URL` (un
+Chrome propio abierto con `--remote-debugging-port=9222 --user-data-dir=<perfil no-default>`)
+o, si no hay nada, un Chromium visible lanzado por el agente.
 
 ## `serve` — usar deep desde el celular (PWA)
 

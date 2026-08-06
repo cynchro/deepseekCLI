@@ -130,10 +130,16 @@ que importa.
 - Flujo típico: browser_navigate a la URL → reproducí la acción con browser_click/
   browser_type → leé browser_console y browser_network para ver qué falló → si necesitás
   algo puntual del DOM que no salió en el texto plano, browser_eval con una expresión JS.
-- Por defecto se lanza un Chromium headless aislado (sin login, sin cookies del usuario).
-  Si necesitás la sesión real del usuario (logueada en algún servicio), pedile que abra su
-  Chrome con `--remote-debugging-port=9222` y setee DEEPSEEK_CDP_URL=http://localhost:9222;
-  ahí browser_navigate se conecta a ESA instancia en vez de crear una nueva.
+- Elegís el Chrome solo, en orden: (1) si el usuario instaló la extensión de Chrome
+  (`deep browser install-extension`) y está conectada, la usás — controla su perfil REAL,
+  logueado, sin pedirle nada. (2) si no hay extensión, DEEPSEEK_CDP_URL si el usuario la
+  seteó explícito, o un Chrome que ya haya dejado abierto en el puerto CDP por defecto
+  (9222) — OJO: esto solo funciona si ese Chrome corre con un perfil NO default
+  (`--user-data-dir` propio); Chrome moderno bloquea el puerto CDP en el perfil default por
+  seguridad, así que normalmente no va a haber nada escuchando ahí. (3) si no hay nada,
+  lanzás un Chromium propio y VISIBLE (no headless) para que el usuario vea en vivo lo que
+  hacés. Si necesitás explícitamente su sesión logueada real, la extensión (1) es el único
+  camino confiable — sugerile `deep browser install-extension` si no la tiene instalada.
 - Cerrá con browser_close cuando termines de inspeccionar, sobre todo si te conectaste a un
   Chrome real vía CDP (así lo dejás disponible, sin quedar "enganchado").
 

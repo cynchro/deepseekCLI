@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "deepseekcli Browser Bridge",
+  "description": "Permite que el agente de deepseekcli controle esta ventana de Chrome (tu perfil real, logueado) via chrome.debugger.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnphpd1X10dh5yaxGcMFVRrokOeGE89j13J4iROey57RPc6+59f8tAcURCVDvL/AKH3nLWjmRWv8I+1XQh4aJ/xQknBF/bKq7cWJgwhfsja7y9cu8arClP8U/857ISMfTvOW/qMIIulNt4AI9sUwqQ/td2QFGl0YQrTc3GMEPF+RKz/Gu60hP+8tAOya2rhN5pII0U8yRejWRxfSrIafaBKUUMrciD65cZqIOfRdxQkZmycpK+pwjUzFIiFra51UvdNrmRH0oAAg3nz08huC+hXmLDk/ccNgpq974dhZUWzqp/j66R+t1VLH5Zel66FeLaRNIU//aJ350tEkNcrcn8wIDAQAB",
+  "permissions": ["debugger", "nativeMessaging", "tabs", "activeTab", "storage"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "deepseekcli Browser Bridge",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "minimum_chrome_version": "116"
+}

@@ -8,6 +8,36 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
+- **Extensión de Chrome como backend real del navegador** (`chrome_bridge/`): hasta ahora
+  `browser_navigate`/`browser_click`/etc. solo podían controlar un Chromium aislado (vía
+  Playwright) o un Chrome real conectado por el puerto CDP (`--remote-debugging-port`) — pero
+  Chrome moderno (M136+) bloquea ese puerto en el perfil default por seguridad, así que nunca se
+  podía tocar la sesión logueada real del usuario. Replicando el mecanismo de "Claude in Chrome":
+  una extensión Manifest V3 (`chrome_bridge/extension/`, permiso `debugger`) instalada en el
+  perfil real habla CDP crudo vía `chrome.debugger` desde ADENTRO del navegador — permitido ahí
+  porque es un permiso de extensión que el usuario otorgó explícitamente, no una conexión TCP
+  remota. Se comunica con un native host local (`chrome_bridge/native_host.py`, relay puro
+  stdio↔WebSocket vía Chrome Native Messaging) que dialoga con un endpoint nuevo del daemon
+  (`/ws/browser-bridge` en `pwa/main.py`, puente sync↔async en `pwa/browser_bridge.py`,
+  `BrowserBridge`). `core/tools/browser.py` ahora elige el backend en runtime
+  (`_ensure_driver`): extensión conectada → si no, la cadena Playwright/CDP existente
+  (`DEEPSEEK_CDP_URL` → puerto 9222 → Chromium propio visible, con fallback a headless sin
+  `$DISPLAY`) — mismos 8 nombres de tool para el modelo, transparente qué los implementa. Nuevo
+  comando `deep browser install-extension [--port]` que detecta navegadores Chromium instalados
+  (`~/.config/{google-chrome,chromium,opera,microsoft-edge,vivaldi,BraveSoftware/Brave-Browser}`)
+  y registra el manifest de Native Messaging Host + un launcher ejecutable. `browser_click`/
+  `browser_type` ahora también muestran un cursor visual (punto rojo inyectado vía
+  `Runtime.evaluate`, se desliza hasta el elemento y pulsa al actuar) — versión liviana del
+  indicador visual de Claude in Chrome, sin content script propio ni cambios al manifest.
+  Verificado end-to-end contra un Chrome real (navigate/read_page/click/type/eval/console/
+  network/screenshot/close), encontrando y corrigiendo en el camino: timeout de socket del
+  native host matando la conexión cada 10s de inactividad, permiso `storage` faltante en el
+  manifest, conflicto de `chrome.debugger.attach` con un attachment obsoleto de una sesión
+  anterior, un race condition leyendo `document.title` demasiado pronto tras `Page.navigate`, y
+  duplicación de logs de consola por escuchar `Log.entryAdded` y `Runtime.consoleAPICalled` a la
+  vez (Chrome espeja console.\* en ambos dominios CDP).
+
+### Added
 - **Daemon multi-sesión con attach en vivo** (`deep serve`): la terminal y la PWA (celular) pasan a
   ser clientes intercambiables de la misma sesión de agente, viendo los mismos eventos en vivo por
   WebSocket y pudiendo responder confirmaciones de permisos desde cualquiera de los dos lados — la

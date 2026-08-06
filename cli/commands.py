@@ -1093,3 +1093,34 @@ def _do_fix(system: DeepSeekLearningSystem, task: str, result: dict,
     else:
         print("⚠️  Algunos problemas pueden requerir revisión manual.")
     return fix_result
+
+
+def run_browser_install_extension(port: int = 8000) -> None:
+    """Registra el native host de `chrome_bridge/` en los navegadores Chromium
+    detectados e imprime cómo cargar la extensión. Ver `core/tools/browser.py`
+    y `chrome_bridge/` para el resto del mecanismo (extensión → native host →
+    /ws/browser-bridge → _ExtensionDriver)."""
+    try:
+        import chrome_bridge
+        from chrome_bridge.install import install, detected_browsers, EXTENSION_ID
+    except ImportError:
+        print("❌ No se encontró chrome_bridge/. Actualizá con: deep upgrade")
+        return
+
+    browsers = detected_browsers()
+    if not browsers:
+        print("  ⚠️  No se encontró ningún navegador Chromium en las rutas conocidas")
+        print("      (google-chrome, chromium, brave, edge, opera, vivaldi en ~/.config).")
+        return
+
+    written = install(port=port)
+    for p in written:
+        print(f"  ✅ Native host registrado: {p}")
+
+    ext_dir = Path(chrome_bridge.__file__).parent / "extension"
+    print("\n  Cargá la extensión (una vez por navegador) en chrome://extensions:")
+    print("   1. Activá 'Modo desarrollador' (arriba a la derecha)")
+    print(f"   2. 'Cargar descomprimida' → {ext_dir}")
+    print(f"   3. Verificá que el ID de la card coincida con: {EXTENSION_ID}")
+    print("      (si no coincide, la extensión no va a poder conectarse)")
+    print("\n  Después corré `deep serve` — tiene que estar corriendo para que la extensión conecte.")
