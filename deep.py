@@ -124,6 +124,59 @@ def _legacy(argv: list):
 
     p_agent.set_defaults(func=do_agent)
 
+    # ── autobuild ────────────────────────────────────────────────────────────
+    p_auto = sub.add_parser(
+        "autobuild",
+        help="Relanza `deep agent` en loop hasta agotar un backlog externo "
+             "(builds largos sin supervisión, sobrevive a cortes de sesión)")
+    p_auto.add_argument("-w", "--workspace", default="", metavar="DIR")
+    p_auto.add_argument("--prompt-file", default="prompt-autonomous.md", metavar="ARCHIVO",
+                        help="Prompt de la primera iteración, relativo al workspace "
+                             "salvo que sea absoluto (default: prompt-autonomous.md)")
+    p_auto.add_argument("--resume-file", default="prompt-resume.md", metavar="ARCHIVO",
+                        help="Prompt de las iteraciones siguientes (default: prompt-resume.md)")
+    p_auto.add_argument("--done-file", default="", metavar="ARCHIVO",
+                        help="Archivo a chequear tras cada iteración (ej. un backlog en "
+                             "Markdown). Si deja de tener coincidencias de --done-pattern, "
+                             "se considera terminado. Sin esto, solo corta por tope de "
+                             "iteraciones o por el stop file.")
+    p_auto.add_argument("--done-pattern", default=r"^-\s*\[\s*\]", metavar="REGEX",
+                        help="Patrón que indica 'trabajo pendiente' en --done-file "
+                             "(default: ítem de checklist Markdown sin marcar, '- [ ]')")
+    p_auto.add_argument("--max-iterations", type=int, default=100, metavar="N")
+    p_auto.add_argument("--sleep-between", type=float, default=15, metavar="SEGUNDOS")
+    p_auto.add_argument("--max-stagnant", type=int, default=3, metavar="N",
+                        help="Frena si N iteraciones seguidas no producen ningún commit nuevo")
+    p_auto.add_argument("--iteration-timeout", type=float, default=3600, metavar="SEGUNDOS",
+                        help="Mata una iteración de `deep agent` que no termine en este "
+                             "tiempo (0 = sin límite)")
+
+    def do_autobuild(args):
+        _require_api_key()
+        from cli.autobuild import run_autobuild
+
+        def _resolve(base: Path, value: str) -> Path:
+            p = Path(value)
+            return p if p.is_absolute() else base / p
+
+        ws = Path(args.workspace).resolve() if args.workspace else Path.cwd()
+        result = run_autobuild(
+            workspace=ws,
+            prompt_file=_resolve(ws, args.prompt_file),
+            resume_file=_resolve(ws, args.resume_file),
+            done_file=_resolve(ws, args.done_file) if args.done_file else None,
+            done_pattern=args.done_pattern,
+            max_iterations=args.max_iterations,
+            sleep_between=args.sleep_between,
+            max_stagnant=args.max_stagnant,
+            iteration_timeout=args.iteration_timeout,
+            debug=bool(os.environ.get("DEEP_DEBUG")),
+        )
+        print(f"[autobuild] Terminado — motivo: {result.get('reason')} — "
+              f"{result.get('iterations_run', 0)} iteraciones totales.")
+
+    p_auto.set_defaults(func=do_autobuild)
+
     # ── remote ───────────────────────────────────────────────────────────────
     p_remote = sub.add_parser(
         "remote", help="REPL interactivo sobre un workspace remoto vía SSH")

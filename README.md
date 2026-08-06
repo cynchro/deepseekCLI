@@ -137,6 +137,48 @@ deep agent "..." -w ./mi-proyecto                          # workspace específi
 
 `deep agent` lanza el mismo loop pero para una sola tarea y termina.
 
+### Construcción autónoma de varios días (`deep autobuild`)
+
+`deep agent` corre **un** turno y termina — para un build grande, sin supervisión,
+que puede tardar horas o días, `deep autobuild` relanza `deep agent` como **proceso
+nuevo** cada vez que termina (por cualquier motivo), hasta que un backlog externo
+se vacíe:
+
+```bash
+deep autobuild -w ./mi-proyecto \
+  --prompt-file prompt-autonomous.md \
+  --resume-file prompt-resume.md \
+  --done-file tasks/backlog.md
+```
+
+- **`--prompt-file`**: la tarea de la primera iteración (default: `prompt-autonomous.md`
+  en el workspace). **`--resume-file`**: la tarea de las iteraciones siguientes
+  (default: `prompt-resume.md`) — normalmente le decís "leé el estado y seguí donde
+  quedaste, no repitas trabajo ya hecho".
+- **`--done-file`**: un archivo (típicamente un backlog en Markdown con checkboxes) que
+  se chequea después de cada iteración. Por defecto considera "pendiente" cualquier
+  línea `- [ ]` (configurable con `--done-pattern`); cuando ya no queda ninguna,
+  `autobuild` termina solo. Sin `--done-file`, solo para por `--max-iterations` o por
+  el archivo de stop.
+- **Parar de forma prolija** desde otra terminal: `touch <workspace>/.deep/autobuild.stop`
+  (se borra solo al ser detectado, no hace falta limpiarlo a mano).
+- **Detección de estancamiento**: si `--max-stagnant` iteraciones seguidas no producen
+  ningún commit nuevo, corta solo — evita quemar cuota de API si el agente quedó
+  trabado en un loop sin progreso real.
+- **Sobrevive a que se corte el proceso**: el conteo de iteraciones se persiste en
+  `.deep/autobuild_state.json`; si `deep autobuild` se corta (se cierra la terminal,
+  se reinicia la máquina) y lo volvés a correr con el mismo `-w`, retoma desde donde
+  iba (usa `--resume-file`, no vuelve a `--prompt-file`) en vez de arrancar de cero.
+- Para que sobreviva a que cierres la terminal, corré con `nohup`/`screen`/`tmux`, o
+  como servicio — `deep autobuild` en sí mismo no se demoniza solo.
+- Complementa (no reemplaza) el auto-resume que ya existe dentro de un mismo turno
+  cuando se agota `max_steps` (ver "Trabajos grandes" más abajo): ese es intra-proceso
+  y acotado a un tope chico; `autobuild` es el nivel de arriba, entre procesos, sin
+  ese tope — pensado justamente para que un corte de sesión no tire abajo un build de
+  varios días.
+
+Cada iteración loguea en `<workspace>/.deep/autobuild_logs/`.
+
 ### Workspace remoto (SSH)
 
 `deep` puede operar sobre una carpeta en **otra máquina** vía SSH —leer, editar, listar
