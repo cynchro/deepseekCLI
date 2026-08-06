@@ -263,6 +263,7 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | `generate_code` / `apply_edit` | Generación/edición **delegada a FLASH** — excepción, para volumen mecánico de bajo riesgo (boilerplate, scaffolding). `apply_edit` usa bloques SEARCH/REPLACE quirúrgicos. |
 | `write_tasks` / `update_task` | Lista de tareas persistente (`.deep/tasks.json`) para trabajos largos. |
 | `spawn_agent` | Delega una parte grande y autocontenida a un sub-agente con contexto fresco. |
+| `exit_plan_mode` | **Solo en modo `plan`.** Presenta el plan propuesto y pide aprobación explícita antes de pasar a ejecución (ver "Permisos / modos" más abajo). |
 
 ### Lo que lo acerca a Claude Code
 
@@ -280,13 +281,15 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | Comando | Qué hace |
 |---------|----------|
 | `/init` | Explora el proyecto y escribe/actualiza `DEEP.md` (el contexto del proyecto). |
-| `/mode [ask\|auto\|plan\|yolo]` | Cambia el modo de permisos (ver abajo). Sin argumento muestra el actual. |
+| `/mode [ask\|auto\|plan\|yolo]` | Cambia el modo de permisos (ver abajo). Sin argumento abre un selector interactivo (↑↓ Enter, Esc cancela). |
 | `/model [pro\|flash]` | Modelo orquestador del loop (default: `pro`). |
 | `/tasks` | Muestra el plan de tareas persistente. |
 | `/rules` | Muestra el `DEEP.md` y `.deeprules` cargados. |
 | `/skills` · `/skill <n> <tarea>` | Lista skills / corre una tarea aplicando un skill. |
 | `/cost` | Tokens y costo estimado por modelo de la sesión (con cache hits). |
 | `/clear` · `/new` | Reinicia la conversación del agente. |
+| `/sessions` | Lista las sesiones activas en el daemon (`deep serve`) — incluida esta terminal y cualquier PWA atacheada. |
+| `/attach <id>` | Te conecta a una sesión existente del daemon (ver `/sessions`) en vez de crear una nueva. |
 | `/remote` | Conecta la sesión actual a un workspace remoto vía SSH, pidiendo el host y la carpeta paso a paso (sin recordar `--host`). |
 | `/disconnect` · `/logout` | Cierra la conexión remota y vuelve a trabajar en el directorio local. |
 | `/balance` `/history` `/doctor` `/show` `/serve` `/upgrade` | Comandos legacy (passthrough). |
@@ -300,8 +303,26 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 |------|----------------|
 | `ask` (default) | Pregunta antes de escribir y de ejecutar. Respondé `a` para no volver a preguntar en la sesión. |
 | `auto` | Acepta ediciones de archivos automáticamente; el shell sigue preguntando. |
-| `plan` | Solo lectura: bloquea escrituras y shell (incluida la verificación automática). |
+| `plan` | Solo investigación (lectura/`grep`/`search_code`/`explore`): las tools de escritura, shell y demás con efecto secundario ni le aparecen al modelo. En vez de aplicar cambios, propone un plan con `exit_plan_mode` y te pide aprobación. |
 | `yolo` | Acepta todo sin preguntar. |
+
+Escribí `/mode` sin argumento para elegir con un selector interactivo (↑↓ para moverse, Enter
+para confirmar, Esc o Ctrl-C para cancelar sin cambiar nada) — muestra la descripción de cada
+modo y resalta el actual. También podés saltar directo con `/mode plan`, `/mode auto`, etc.
+
+### Plan mode (`/mode plan`)
+
+Igual que en Claude Code: en modo `plan` el agente investiga sin tocar nada y, cuando tiene
+una propuesta, te la muestra y te pregunta `¿Aprobás este plan y pasás a modo ejecución? [s/N]`.
+
+- **Si aprobás**, el modo vuelve automáticamente al que tenías activo antes de entrar en `plan`
+  (`ask` por default) y el agente sigue ejecutando el plan en el mismo turno, sin que tengas
+  que repetir el pedido.
+- **Si no aprobás**, seguís en `plan`: podés pedirle que ajuste la propuesta y va a volver a
+  llamar `exit_plan_mode` con una versión revisada.
+
+Funciona igual en la terminal, en `deep serve` (daemon) y desde la PWA — es la misma sesión
+de agente vista desde 3 clientes distintos.
 
 ---
 
@@ -394,6 +415,32 @@ Hay ejemplos en [`examples/skills/`](examples/skills/) (reviewer, security, docs
 
 ---
 
+## Attach en vivo: la misma sesión desde la terminal y desde el celular
+
+Desde la Fase 1-3 del rearquitecturado de sesiones, `deep` (el REPL de la terminal) **ya no
+ejecuta el agente en el propio proceso**: se conecta como cliente a un daemon (`deep serve`) que
+arranca solo, en background, la primera vez que hace falta — no hace falta correr `deep serve` a
+mano. Esto permite que la **misma sesión** esté abierta simultáneamente desde la terminal y desde
+el celular (la PWA de `deep serve`), viendo los mismos eventos en vivo y pudiendo responder
+confirmaciones de permisos desde cualquiera de los dos lados — la misma idea que la consola web
+de Claude Code, pero con `deep`.
+
+- **`/sessions`** lista las sesiones activas del daemon (con su workspace, modo y si están ocupadas).
+- **`/attach <id>`** te conecta a una sesión en curso en vez de crear una nueva.
+- Solo un cliente puede mandar un turno a la vez: si la sesión ya está ocupada (por ejemplo, la
+  estás usando desde el celular a la vez), el otro lado ve "sesión ocupada" en vez de pisar el turno.
+- Si el agente necesita confirmar un permiso, la pregunta les llega a **todos** los clientes
+  atacheados a esa sesión; el primero que contesta es el que vale.
+- El daemon autoarrancado sobrevive a que cierres la terminal (queda corriendo en background), pero
+  no a un reinicio de la máquina. Su log queda en `~/.config/deep/serve.log`; para pararlo del todo,
+  `pkill -f "deep serve"`.
+- Esto vale solo para workspaces **locales** — sobre SSH (`--host` / `/remote`) la terminal sigue
+  ejecutando el agente en el propio proceso, sin pasar por el daemon.
+
+Esto reemplaza como funciona `deep serve` de puertas para adentro: sigue siendo el mismo comando,
+pero ahora expone las sesiones por WebSocket (`/ws/session`) en vez del streaming SSE viejo, y
+terminal + PWA son dos clientes iguales del mismo daemon.
+
 ## `serve` — usar deep desde el celular (PWA)
 
 ```bash
@@ -404,9 +451,16 @@ deep serve --port 9000 --https
 ```
 
 Levanta una interfaz web (FastAPI) accesible desde cualquier dispositivo en la red. Incluye un
-toggle **🤖 Agente** que rutea el texto natural al agent loop por streaming (SSE), mostrando la
-actividad de tools en vivo y el costo por modelo. Por seguridad, en remoto las **escrituras** se
-permiten pero el **shell está bloqueado** salvo que pongas `DEEP_REMOTE_SHELL=1`.
+toggle **🤖 Agente** que ataches por WebSocket a una sesión del daemon (ver arriba), mostrando la
+actividad de tools en vivo, confirmaciones de permisos con botones, y un panel de **sesiones
+activas** para atachearte a cualquiera en curso (incluida una que hayas arrancado desde la terminal).
+
+#### Autenticación
+
+`deep serve` **siempre** requiere autenticación: si no seteás `DEEP_APP_PASSWORD`, se genera un
+token solo la primera vez y se guarda en `~/.config/deep/config.json` (mismo archivo y permisos
+`0600` que la API key) — se comparte automáticamente entre la terminal y la PWA sin que tengas que
+copiarlo a mano. `deep doctor` muestra si ya existe.
 
 #### Recomendación: Tailscale
 

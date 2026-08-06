@@ -36,6 +36,7 @@ deepseekcli/
 ├── cli/                     # Capa de presentación (terminal)
 │   ├── agent_repl.py        #   REPL agente-first (interactivo)
 │   ├── agent_runner.py      #   Runner de consola: permisos + display de eventos
+│   ├── daemon_client.py     #   Cliente WS del daemon (autostart + sesión síncrona)
 │   ├── commands.py          #   Comandos de alto nivel (build, update, serve, etc.)
 │   ├── display.py           #   Pretty-printing (balance, archivos, evaluación)
 │   ├── spinner.py           #   Spinner animado para operaciones largas
@@ -81,8 +82,9 @@ deepseekcli/
 │       ├── tasks.py         #     write_tasks, update_task
 │       ├── subagent.py      #     spawn_agent
 │       └── explore.py       #     explore (investigación read-only delegada a FLASH)
-├── pwa/                     # Servidor web y PWA (acceso desde el celular)
-│   ├── main.py              #   FastAPI + SSE streaming del agente
+├── pwa/                     # Daemon de sesiones (deep serve) + PWA (acceso desde el celular)
+│   ├── main.py              #   FastAPI + WebSocket (/ws/session), endpoints REST
+│   ├── session_hub.py       #   SessionHub/SessionRegistry: AgentLoop compartido, fan-out, confirm round-trip
 │   ├── generate_icons.py    #   Generación de íconos PWA
 │   └── static/              #   Frontend: HTML, JS, CSS, manifest, service worker
 ├── tests/                   # Tests unitarios
@@ -140,10 +142,23 @@ Cuatro modos que controlan escritura y ejecución:
 |------|-----------|-------|
 | `ask` (default) | Pregunta | Pregunta |
 | `auto` | Acepta | Pregunta |
-| `plan` | Bloquea | Bloquea |
+| `plan` | Bloquea (propone plan) | Bloquea |
 | `yolo` | Acepta | Acepta |
 
 Cada tool llama a `ctx.confirm(descripción)` antes de operaciones sensibles. El gate de permisos se implementa en `cli/agent_runner.py` (clase `Permissions`) y se inyecta en el `ToolContext`.
+
+**Plan mode (`plan`)**: no es solo un bloqueo estático — tiene ciclo de vida, estilo Claude
+Code. En modo `plan`, `AgentLoop` excluye del *schema* (no solo del gate en runtime) todas las
+tools con efecto secundario (`_PLAN_BLOCKED_TOOLS` en `core/agent_loop.py`: `write_file`,
+`edit_file`, `run_command`, `generate_code`, `apply_edit`, `write_tasks`, `update_task`,
+`spawn_agent`, `browser_click`/`browser_type`/`browser_eval`/`browser_screenshot`) y le inyecta
+al modelo (solo a él, no al evento que ve la UI) una directiva pidiéndole que investigue y
+proponga con la tool `exit_plan_mode(plan)` en vez de intentar escribir. Esa tool dispara
+`ctx.confirm_plan(plan)`: un round-trip de aprobación que **siempre** pregunta (bypassa el
+gate de modo) y, si se aprueba, cambia el modo automáticamente al que estaba activo *antes* de
+entrar a `plan` (`Permissions.set_mode`/`_pre_plan_mode`) — el agente sigue ejecutando el plan
+en el mismo turno, sin que el usuario tenga que repetir el pedido. Si se rechaza, la sesión
+sigue en `plan` y el modelo puede ajustar la propuesta.
 
 ---
 
@@ -180,6 +195,7 @@ En `core/tools/__init__.py`, cada módulo de tools exporta un diccionario `TOOLS
 | `workspace` | `Path` raíz del proyecto |
 | `on_event` | Callback para emitir eventos de UI |
 | `confirm` | Gate de permisos |
+| `confirm_plan` | Round-trip de aprobación de `exit_plan_mode` (siempre pregunta, bypassa el modo) |
 | `builder` | Instancia de `CodeBuilder` (para generate_code/apply_edit) |
 | `spawn` | Función para lanzar sub-agentes |
 | `explore` | Función para investigación delegada a FLASH |
@@ -202,6 +218,7 @@ En `core/tools/__init__.py`, cada módulo de tools exporta un diccionario `TOOLS
 | `update_task` | `tasks.py` | Cambiar estado de una tarea |
 | `spawn_agent` | `subagent.py` | Lanzar sub-agente para tarea autocontenida |
 | `explore` | `explore.py` | Investigación read-only delegada a FLASH |
+| `exit_plan_mode` | `plan.py` | Solo en modo `plan`: presenta el plan propuesto y pide aprobación antes de ejecutar |
 
 Las tools `write_file` y `edit_file` son las herramientas PRINCIPALES para escribir código (las usa PRO directamente). `generate_code` y `apply_edit` son la EXCEPCIÓN, para volumen mecánico de bajo riesgo delegado a FLASH.
 
@@ -332,7 +349,10 @@ Cada `REPLAN_EVERY_N` archivos (default 3), el sistema re-evalúa el plan: PRO r
 
 ### 11.1 REPL agente-first (principal)
 
-`cli/agent_repl.py` — El usuario escribe en lenguaje natural. El texto va directo al `AgentLoop`. Los `/comandos` controlan la sesión:
+`cli/agent_repl.py` — El usuario escribe en lenguaje natural. Sobre un workspace **local**, el texto
+va al daemon (`deep serve`, ver 11.3) vía `cli/daemon_client.py`, que lo autoarranca en background
+si hace falta; sobre un workspace **SSH** (`--host`/`/remote`), el texto va directo a un `AgentLoop`
+local, sin pasar por el daemon. Los `/comandos` controlan la sesión:
 
 | Comando | Acción |
 |---------|--------|
@@ -343,18 +363,35 @@ Cada `REPLAN_EVERY_N` archivos (default 3), el sistema re-evalúa el plan: PRO r
 | `/cost` | Tokens y costo por modelo de la sesión |
 | `/clear` `/new` | Reiniciar conversación |
 | `/skills` `/skill` | Listar/ejecutar skills |
+| `/sessions` | Listar sesiones activas del daemon (terminal + PWA) |
+| `/attach <id>` | Atachearse a una sesión del daemon en curso |
 
 ### 11.2 Modo directo (CLI)
 
 `deep agent "tarea"` lanza el loop para una sola tarea y termina. Útil para scripting.
 
-### 11.3 PWA (serve)
+### 11.3 Daemon multi-sesión y PWA (serve)
 
-`deep serve` levanta un servidor FastAPI con:
+`deep serve` levanta un servidor FastAPI que es, a la vez, el daemon de sesiones para la terminal y
+el backend de la PWA — ambos son clientes del mismo proceso:
 
-- **Endpoints REST**: `/api/ask`, `/api/agent` (streaming SSE), `/api/ls`, `/api/projects`, `/api/run` (build/fix/update/balance/workspace).
-- **Agente remoto**: `/api/agent` corre el `AgentLoop` en un thread y streamea los eventos por SSE (tool calls, resultados, verificación, respuesta final). Por seguridad, el shell está bloqueado salvo que se habilite con `DEEP_REMOTE_SHELL=1`.
-- **Frontend PWA**: `pwa/static/` — HTML+JS+CSS vanilla, instalable como app nativa en el celular.
+- **`SessionHub`/`SessionRegistry`** (`pwa/session_hub.py`): cada sesión envuelve un `AgentLoop` +
+  `Permissions`, con fan-out a N suscriptores (terminal, PWA, o ambos a la vez sobre la misma
+  sesión) y confirm round-trip (el pedido de permiso se transmite a todos los clientes atacheados;
+  el primero que contesta resuelve el turno, con timeout de 120s que deniega por default). El
+  `confirm_request` lleva un campo `kind` (`"confirm"` normal o `"plan"` para la aprobación de
+  `exit_plan_mode`); aprobar un plan cambia el modo de la sesión y se propaga a todos los
+  clientes atacheados vía el mismo evento `mode_changed` que ya usa `/mode`.
+- **`/ws/session`** (WebSocket): protocolo único para turnos, eventos en vivo, confirmaciones,
+  cambio de modo/modelo y cierre prolijo (journal). Reemplazó el streaming SSE viejo de `/api/agent`
+  (ya retirado).
+- **`GET /api/sessions`**: lista sesiones activas (id, workspace, modo, si están ocupadas).
+- **`cli/daemon_client.py`**: cliente WS síncrono usado por la terminal (`ensure_daemon()` autoarranca
+  `deep serve` en background la primera vez que hace falta, sin que el usuario lo corra a mano).
+- **Auth obligatoria**: token en `~/.config/deep/config.json` (mismo archivo/permisos que la API
+  key), generado solo si no hay `DEEP_APP_PASSWORD`; lo comparten terminal y PWA.
+- **Frontend PWA**: `pwa/static/` — HTML+JS+CSS vanilla, instalable como app nativa en el celular,
+  con panel de sesiones y confirmación de permisos por botones.
 - **HTTPS**: `deep serve --https` genera certificados autofirmados con `trustme` para instalar la PWA.
 
 ---
@@ -401,6 +438,7 @@ El idioma del **código generado** se controla independientemente con variables 
 ### Dependencias core (install default)
 - `requests>=2.28` — Cliente HTTP
 - `prompt_toolkit` — REPL con autocompletado e historial
+- `websocket-client` — cliente WS síncrono del REPL contra el daemon (`cli/daemon_client.py`)
 
 ### Dependencias opcionales
 | Extras | Paquete | Para |
@@ -425,16 +463,16 @@ El idioma del **código generado** se controla independientemente con variables 
                            │
             ┌──────────────┴──────────────┐
             ▼                              ▼
-   ┌──────────────────┐          ┌──────────────────┐
-   │  cli/            │          │  pwa/            │
-   │  agent_repl.py   │          │  main.py         │
-   │  agent_runner.py │          │  (FastAPI + SSE)  │
-   │  commands.py     │          │  static/ (PWA)    │
-   │  display.py      │          └────────┬─────────┘
-   └────────┬─────────┘                   │
-            │                              │
-            └──────────────┬──────────────┘
-                           ▼
+   ┌──────────────────┐   WS (daemon_client.py)  ┌──────────────────┐
+   │  cli/            │◀─────────────────────────│  pwa/            │
+   │  agent_repl.py   │  workspace local: la      │  main.py         │
+   │  agent_runner.py │  terminal es cliente WS   │  (FastAPI + WS)  │
+   │  commands.py     │  del daemon, no dueña      │  session_hub.py │
+   │  display.py      │  del AgentLoop             │  static/ (PWA)  │
+   └────────┬─────────┘                            └────────┬─────────┘
+            │ (solo SSH: AgentLoop local, sin daemon)         │
+            └───────────────────────┬─────────────────────────┘
+                                    ▼
               ┌─────────────────────────┐
               │  core/agent_loop.py     │
               │  (AgentLoop)            │
@@ -483,7 +521,7 @@ El idioma del **código generado** se controla independientemente con variables 
 | **Update legacy** | `core/system.py::execute_update()` | FLASH | Modificación de proyecto existente |
 | **Claudejob** | `cli/commands.py::run_claudejob()` | PRO + FLASH | Claude planifica (job.md), DeepSeek construye y corrige |
 | **Scan** | `core/project_scanner.py::scan()` | — (determinista) | Análisis de proyecto existente sin LLM |
-| **Serve (PWA)** | `pwa/main.py` (FastAPI) | PRO (loop vía SSE) | Agente accesible desde el celular |
+| **Serve (daemon + PWA)** | `pwa/main.py` (FastAPI) | PRO (loop vía WebSocket) | Daemon de sesiones compartido por la terminal y el celular — ver 11.3 |
 
 ---
 

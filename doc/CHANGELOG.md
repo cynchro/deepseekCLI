@@ -7,6 +7,66 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [Unreleased]
 
+### Added
+- **Daemon multi-sesión con attach en vivo** (`deep serve`): la terminal y la PWA (celular) pasan a
+  ser clientes intercambiables de la misma sesión de agente, viendo los mismos eventos en vivo por
+  WebSocket y pudiendo responder confirmaciones de permisos desde cualquiera de los dos lados — la
+  misma sesión se puede seguir trabajando desde la consola y desde el celular a la vez, como en
+  Claude Code. Nuevo `pwa/session_hub.py` (`SessionHub`/`SessionRegistry`: fan-out a N suscriptores,
+  confirm round-trip con `threading.Event`, timeout de 120s que deniega por default si nadie
+  contesta) y `cli/daemon_client.py` (autoarranca `deep serve` en background si no hay uno
+  corriendo, cliente WS síncrono). Nuevos comandos de REPL `/sessions` (lista las sesiones activas
+  del daemon) y `/attach <id>` (se ataches a una en curso). Solo un cliente puede mandar un turno a
+  la vez; el resto ve "sesión ocupada" en vez de pisarlo. Auth obligatoria siempre (token
+  autogenerado en `~/.config/deep/config.json`, compartido entre terminal y PWA). Nueva dependencia
+  core: `websocket-client`. Alcance: solo workspaces locales — sobre SSH (`--host`/`/remote`) la
+  terminal sigue ejecutando el `AgentLoop` en el propio proceso, sin pasar por el daemon. Verificado
+  con un `deep serve` real (no solo mocks): autoarranque, fan-out entre dos clientes independientes
+  contra un uvicorn de verdad, y un smoke test completo en Chrome.
+- `pwa/static/app.js`: el modo agente migró de streaming SSE a WebSocket, con un panel de
+  "Sesiones activas" (atacheate a cualquiera con un tap) y confirmación de permisos con botones
+  (Sí / No / "No preguntar más") en vez de no poder contestarle al agente desde el celular.
+- `deep doctor` reporta si el token del daemon ya existe.
+- **Selector interactivo para `/mode`**: escribir `/mode` sin argumento ya no solo imprime la
+  lista de modos — abre un picker inline (↑↓ para moverse, Enter confirma, Esc/Ctrl-C cancela)
+  con la descripción de cada modo y el actual resaltado, en vez de tener que recordar y tipear
+  el nombre del modo a mano. `cli/agent_repl.py::_pick_mode`, con una `Application` mínima de
+  `prompt_toolkit` (mismo patrón que ya usaba el REPL, sin dependencias nuevas). Cae al listado
+  de texto de siempre si `prompt_toolkit` no está disponible.
+- **Plan mode con ciclo de vida real** (`/mode plan`), estilo Claude Code: el modo `plan` ya
+  existía como bloqueo estático de escritura/shell, ahora tiene flujo completo de
+  investigar → proponer → aprobar → ejecutar. En modo `plan`, `AgentLoop` excluye del schema
+  (no solo del gate en runtime) todas las tools con efecto secundario y le indica al modelo que
+  investigue y proponga con la nueva tool `exit_plan_mode(plan)` en vez de intentar escribir.
+  Aprobar el plan (`¿Aprobás este plan y pasás a modo ejecución? [s/N]`) cambia el modo
+  automáticamente al que estaba activo *antes* de entrar a `plan` — no a `ask` fijo — y el
+  agente sigue ejecutando el plan en el mismo turno, sin repetir el pedido; rechazarlo lo deja
+  en `plan` para ajustar la propuesta. Reusa el mismo mecanismo de confirm round-trip que ya
+  existía (cero transporte nuevo): funciona igual en la terminal, en `deep serve` y desde la
+  PWA (burbuja de plan dedicada en `app.js`, con `marked.parse`). De paso cierra dos gaps de
+  permisos preexistentes que nunca pasaban por ningún gate: `write_tasks`/`update_task` y las
+  tools `browser_click`/`browser_type`/`browser_eval`/`browser_screenshot`, ahora bloqueadas en
+  modo `plan` igual que el resto.
+
+### Fixed
+- **Plan mode a veces no proponía nada**: en modo `plan`, el modelo a veces respondía el plan
+  como texto libre en el turno final en vez de llamar a `exit_plan_mode`, así que el usuario
+  nunca veía el prompt de aprobación y el modo quedaba "trabado" en `plan` sin salida. Ahora
+  `AgentLoop` detecta ese caso (respuesta final sin tool_calls, en modo plan, sin haber llamado
+  `exit_plan_mode` en el turno) y reinyecta un pedido forzando la tool — un solo reintento, para
+  no loopear si la pregunta era puramente informativa y no había ningún plan que proponer.
+
+### Fixed
+- El autocompletado del REPL (`WordCompleter`) desplegaba la lista completa de `/comandos` cada vez
+  que arrancabas una palabra nueva escribiendo una tarea en texto plano — pasaba porque una palabra
+  vacía matchea con cualquier prefijo. Ahora solo sugiere si la línea empieza con `/`, y además
+  filtra bien por prefijo después de la barra (antes `/mo` no acotaba a `/mode`/`/model`).
+
+### Removed
+- `/api/agent` (streaming SSE) y `DEEP_REMOTE_SHELL`, reemplazados por `/ws/session` y el confirm
+  round-trip real: el celular pregunta permiso igual que la terminal, ya no hace falta una política
+  fija de shell bloqueado.
+
 ## [0.10.0] - 2026-07-23
 
 ### Added
