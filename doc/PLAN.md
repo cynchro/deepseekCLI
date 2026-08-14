@@ -88,6 +88,16 @@ FLASH sigue siendo "las manos" solo en ese rol acotado.
 
 Telemetría: contabilizar gasto por modelo por separado.
 
+**⚠️ MATIZADO (Fase 12, ver §6) — la suba de precio de DeepSeek forzó reabrir esto, pero
+solo para `spawn_agent`.** El principio de "PRO escribe directo con write_file/edit_file"
+sigue intacto para lo que PRO hace en su propio loop. Lo que cambió es que `spawn_agent`
+—delegar una tarea AUTOCONTENIDA completa a un sub-agente con su propio loop— dejó de
+heredar el modelo del padre y pasó a resolverlo por `role` (default FLASH). No es el
+"truco de tokens" revertido en 2026-06-18 (PRO describe specs, FLASH traduce a código con
+pérdida): el sub-agente sigue escribiendo su propio código directo con write_file/edit_file,
+solo que corriendo en FLASH cuando la tarea delegada es mecánica/bajo riesgo. PRO sigue
+pudiendo pedir un role PRO explícito para la parte delegada que lo justifique.
+
 ---
 
 ## 5. Arquitectura objetivo
@@ -256,6 +266,22 @@ Verificado e2e: 2 módulos independientes construidos en paralelo (tool calls in
 `_run_steps()` con un while de resume. No aplica a sub-agentes (los maneja el padre) ni cuando no
 hay plan abierto (una tarea chica que loopea mejor que corte). Tests deterministas con client que
 nunca termina (test_resume.py): reintenta hasta el tope, no reanuda sin tareas abiertas ni en sub-agentes.
+
+**Fase 12 — Routing por rol para `spawn_agent` (control de costo)** ✅. Motivo: la suba de
+precio de DeepSeek amenazaba la viabilidad de `deep` como CLI de uso diario si cada
+`spawn_agent` seguía corriendo en PRO sin ningún ahorro. Se conecta `ROLE_MODELS`
+(`core/models.py`, tabla que existía desde Fase 0 pero nunca se usaba) vía
+`core/router.py::model_for(role)`. `AgentLoop._spawn_subagent` deja de heredar
+`model=self.model` del padre y resuelve `model_for(role)`; la tool `spawn_agent` expone
+`role` en su schema (default `"build"` → FLASH). `DEFAULT_SYSTEM` actualizado: PRO decide
+QUÉ código debe existir, escribe directo cuando hay razonamiento/diseño/detalles sutiles,
+delega ejecución mecánica bien especificada a FLASH (vía `generate_code`/`apply_edit` o
+`spawn_agent(role=...)`). `/cost` suma el split PRO/FLASH. Sin tocar: `_explore` (fijo
+FLASH read-only), `_auto_verify` (solo el padre), plan mode, `max_depth`/paralelismo/
+permisos. Ver matiz en §4 sobre por qué esto no repite el "truco de tokens" revertido en
+2026-06-18. Verificado: suite completa (307 tests, antes 296) + `tests/test_spawn_roles.py`
+nuevo cubre la regresión (padre PRO delega en FLASH por default; padre FLASH puede pedir
+PRO explícito por role).
 
 ---
 

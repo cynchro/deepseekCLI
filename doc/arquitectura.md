@@ -173,12 +173,12 @@ El sistema divide el trabajo entre dos modelos con distinto costo y capacidad:
 
 | Rol | Modelo | Responsabilidades |
 |-----|--------|-------------------|
-| **PRO** (orquestador) | `deepseek-v4-pro` | Decidir qué tool llamar, escribir código (write_file/edit_file), revisar diffs, verificar |
-| **FLASH** (constructor) | `deepseek-v4-flash` | Leer/resumir (`explore`), compactar contexto, generar código mecánico (`generate_code`/`apply_edit`), resumir sesión para la bitácora |
+| **PRO** (orquestador) | `deepseek-v4-pro` | Decidir qué tool llamar, escribir código directo (write_file/edit_file) cuando hay diseño/razonamiento/detalles sutiles, revisar diffs, verificar |
+| **FLASH** (constructor) | `deepseek-v4-flash` | Leer/resumir (`explore`), compactar contexto, generar código mecánico (`generate_code`/`apply_edit`), ejecutar sub-agentes delegados de bajo riesgo (`spawn_agent`, role default), resumir sesión para la bitácora |
 
-**Principio de calidad**: PRO escribe el código que importa. FLASH se usa solo para volumen mecánico de bajo riesgo (boilerplate, scaffolding, resúmenes). La calidad no se sacrifica por ahorrar tokens.
+**Principio de calidad**: "el modelo más barato que pueda hacer bien el trabajo, no siempre el más barato". PRO decide QUÉ código debe existir y escribe directo cuando la parte importa (diseño, algoritmos, APIs delicadas). FLASH ejecuta trabajo suficientemente especificado y de bajo riesgo — como constructor directo (`generate_code`/`apply_edit`) o como sub-agente completo (`spawn_agent(role="build")`, default). Quien orquesta puede pedir explícitamente un role PRO (`orchestrate`/`plan`/`review`/`decide`/`reflect`) para la parte delegada que en particular necesite juicio propio. La calidad no se sacrifica por ahorrar tokens.
 
-El enrutado se define en `core/models.py` (tabla `ROLE_MODELS`) y se resuelve en `core/router.py`. Los IDs deprecados `deepseek-chat` y `deepseek-reasoner` se mapean automáticamente a los modelos v4 (sunset 2026-07-24).
+El enrutado se define en `core/models.py` (tabla `ROLE_MODELS`) y se resuelve en `core/router.py` (`model_for(role)`). `spawn_agent` expone `role` en su schema (enum generado desde `ROLE_MODELS`) y `AgentLoop._spawn_subagent` resuelve el modelo del hijo por rol — no lo hereda del padre. Los IDs deprecados `deepseek-chat` y `deepseek-reasoner` se mapean automáticamente a los modelos v4 (sunset 2026-07-24).
 
 ---
 
@@ -225,11 +225,11 @@ En `core/tools/__init__.py`, cada módulo de tools exporta un diccionario `TOOLS
 | `explore` | `explore.py` | Investigación read-only delegada a FLASH |
 | `exit_plan_mode` | `plan.py` | Solo en modo `plan`: presenta el plan propuesto y pide aprobación antes de ejecutar |
 
-Las tools `write_file` y `edit_file` son las herramientas PRINCIPALES para escribir código (las usa PRO directamente). `generate_code` y `apply_edit` son la EXCEPCIÓN, para volumen mecánico de bajo riesgo delegado a FLASH.
+Las tools `write_file` y `edit_file` son las herramientas PRINCIPALES para escribir código (las usa PRO directamente). `generate_code`/`apply_edit` (un archivo) y `spawn_agent(role=...)` (una tarea autocontenida) delegan a FLASH por default — pedir un role PRO ahí es la EXCEPCIÓN, solo cuando la parte delegada lo justifica.
 
 ### 5.4 Sub-agentes y paralelismo
 
-`spawn_agent` crea un `AgentLoop` hijo con contexto fresco que comparte el mismo `DeepSeekClient` y workspace. Cuando el modelo emite **2+ spawn_agent en el mismo turno**, se ejecutan en **paralelo** con `ThreadPoolExecutor`. Los sub-agentes:
+`spawn_agent` crea un `AgentLoop` hijo con contexto fresco que comparte el mismo `DeepSeekClient` y workspace; el modelo del hijo se resuelve por `role` (default `"build"` → FLASH) vía `core.router.model_for` — **no se hereda del padre**. Cuando el modelo emite **2+ spawn_agent en el mismo turno**, se ejecutan en **paralelo** con `ThreadPoolExecutor`, cada uno con el role que le corresponda. Los sub-agentes:
 
 - No tocan el plan global (`write_tasks`/`update_task` excluidos)
 - No anidan más allá de `max_depth` (default 2)

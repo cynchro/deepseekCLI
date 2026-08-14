@@ -86,7 +86,9 @@ def _printer(kind: str, data: dict):
     elif kind == "parallel_done":
         print(f"  {_C['green']}⫷ sub-agentes en paralelo listos{_C['reset']}")
     elif kind == "subagent_start":
-        print(f"  {_C['green']}↪ sub-agente:{_C['reset']} {data.get('task','')[:80]}")
+        model = data.get("model", "")
+        tag = f" ({model.split('-')[-1]})" if model else ""
+        print(f"  {_C['green']}↪ sub-agente{tag}:{_C['reset']} {data.get('task','')[:80]}")
     elif kind == "subagent_done":
         files = data.get("files") or []
         icon = "↩" if data.get("success") else "↩ ⚠"

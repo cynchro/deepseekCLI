@@ -19,6 +19,7 @@ from core import tasks as _taskstore
 from core.builder import CodeBuilder
 from core.client import DeepSeekClient
 from core.models import MODEL_FLASH, MODEL_PRO
+from core.router import model_for
 from core.tools import schemas, dispatch, tool_names
 from core.tools import shell as _shell
 from core.tools.base import ToolContext
@@ -76,18 +77,33 @@ sigo con recuperar contraseña"). Dedicá el trabajo real — exploración, escr
 parte NUEVA del pedido.
 
 # Cómo escribís código
-VOS escribís el código. Sos el modelo más capaz del sistema: no delegues la parte
-que importa.
+Vos decidís QUÉ código tiene que existir y cómo debe verse (diseño, algoritmo, casos
+borde, contrato). Ejecutarlo lo hacés vos directo, o lo delegás cuando ya está lo
+bastante especificado y es mecánico/de bajo riesgo — nunca al revés: nunca delegás la
+parte que requiere criterio.
 - write_file → crear un archivo nuevo, con su contenido completo escrito por vos.
 - edit_file → modificar un archivo existente. Es tu herramienta principal de edición:
   un reemplazo de string exacto y QUIRÚRGICO. Tocás solo las líneas que cambian, nunca
   reescribís el archivo entero. Antes de editar, LEÉ el archivo con read_file; el
   old_string debe coincidir carácter por carácter (con contexto suficiente para ser único).
-- generate_code / apply_edit → delegan a un modelo rápido y más barato (FLASH). Son la
-  EXCEPCIÓN, no la regla. Usalos SOLO para volumen mecánico y de bajo riesgo donde la
-  calidad fina no importa: boilerplate repetitivo, scaffolding, datos de fixture, traducir
-  un formato a otro. NUNCA para lógica de negocio, algoritmos, APIs públicas, o cualquier
-  código donde un detalle sutil importe. Si dudás, escribilo vos con write_file/edit_file.
+- generate_code / apply_edit → delegan a FLASH la escritura de UN archivo, ya
+  especificado por vos. Usalos cuando el QUÉ ya está claro y el CÓMO es mecánico: seguir
+  un patrón existente en el repo, boilerplate repetitivo, scaffolding, datos de fixture,
+  traducir un formato a otro.
+- spawn_agent(role=...) → delega una tarea AUTOCONTENIDA completa (no solo un archivo) a
+  un sub-agente. role="build" (default, FLASH) para trabajo bien especificado y mecánico;
+  un role PRO ("plan"/"review"/"decide"/"orchestrate"/"reflect") solo si ESA parte en
+  particular necesita diseño o juicio propio — es más caro, pedilo solo si hace falta.
+- Escribís vos DIRECTO cuando hay razonamiento, diseño, algoritmos no triviales,
+  decisiones de arquitectura, o un detalle sutil donde un error de FLASH saldría caro.
+  Si dudás, escribilo vos.
+
+Ejemplo — "agregá POST /users siguiendo el patrón existente": investigás el patrón (otros
+endpoints), especificás el contrato (path, validación, respuesta), delegás la escritura
+con generate_code/apply_edit o spawn_agent(role="build"), revisás el diff resultante y
+decidís si quedó bien, corrés los tests. Ejemplo — "implementá el algoritmo de
+conciliación de pagos con estas reglas": lo escribís y revisás vos, directo — la lógica
+importa demasiado para delegarla.
 
 # Disciplina de código (no negociable)
 - Antes de escribir, ENTENDÉ el entorno: leé los archivos cercanos y seguí sus convenciones
@@ -150,10 +166,14 @@ que importa.
   Si el plan cambia, volvé a llamar write_tasks con la lista actualizada.
 - Para una parte grande y autocontenida (un módulo, un subsistema), podés delegarla con
   spawn_agent: un sub-agente la construye con su propio contexto y te devuelve un resumen.
-  Pasale una tarea clara y completa (no ve tu charla). Las tareas chicas hacelas vos directo.
+  Pasale una tarea clara y completa (no ve tu charla). Elegí el role por tarea, no por
+  costumbre: "build" (default, FLASH) si está bien especificada y es mecánica; un role PRO
+  solo si ESA parte en particular necesita diseño o juicio propio. Usá el más barato que
+  pueda hacerla bien. Las tareas chicas hacelas vos directo, sin delegar.
 - Si hay varias partes INDEPENDIENTES entre sí (no se pisan archivos ni dependen una de
   otra), emití varios spawn_agent en el MISMO turno: corren en paralelo y es más rápido.
-  Si una parte depende del resultado de otra, hacelas en turnos separados (secuencial).
+  Cada una con el role que le corresponda (no todas tienen que ser iguales). Si una parte
+  depende del resultado de otra, hacelas en turnos separados (secuencial).
 
 # Cierre
 - Antes de declarar terminado, repasá tu propio diff (lo ves en el resultado de cada
@@ -297,14 +317,19 @@ class AgentLoop:
         with self._confirm_lock:
             return self.ctx.confirm(desc)
 
-    def _spawn_subagent(self, task: str, context_files=None) -> str:
+    def _spawn_subagent(self, task: str, context_files=None, role: str = "build") -> str:
         """Lanza un AgentLoop hijo con contexto fresco para una tarea autocontenida.
-        Comparte client (telemetría), workspace y permisos. Devuelve un resumen
-        compacto a PRO — no su transcript — para mantener liviano el contexto del padre.
-        Thread-safe: se puede invocar en paralelo con otros sub-agentes."""
+        Comparte client (telemetría), workspace y permisos. El modelo del hijo se
+        resuelve por ROL (`role`, default "build" -> FLASH) vía core.router.model_for —
+        NO se hereda del padre: quien orquesta decide caso a caso si la parte delegada
+        amerita PRO (diseño/ambigüedad) o alcanza con FLASH (ejecución mecánica bien
+        especificada). Devuelve un resumen compacto a PRO — no su transcript — para
+        mantener liviano el contexto del padre. Thread-safe: se puede invocar en
+        paralelo con otros sub-agentes."""
         if self.depth >= self.max_depth:
             return "ERROR: no se pueden anidar más sub-agentes (max_depth)"
         touched = []
+        child_model = model_for(role)
 
         def child_event(kind, data):
             if kind in ("file_write", "file_edit"):
@@ -312,7 +337,7 @@ class AgentLoop:
             self.on_event(kind, data)   # se muestran anidados entre los brackets
 
         child = AgentLoop(
-            self.client, self.workspace, model=self.model,
+            self.client, self.workspace, model=child_model,
             rules=self._rules, project_context=self._project_context,
             on_event=child_event, confirm=self._locked_confirm,
             max_steps=self.max_steps, compact_threshold=self.compact_threshold,
@@ -325,8 +350,10 @@ class AgentLoop:
         seed = task
         if context_files:
             seed += "\n\nArchivos relevantes para leer primero: " + ", ".join(context_files)
-        self.on_event("subagent_start", {"task": task[:160], "depth": self.depth + 1})
-        _dbg.log("AGENT", f"spawn subagent  depth={self.depth + 1}  task={task[:100]}")
+        self.on_event("subagent_start", {"task": task[:160], "depth": self.depth + 1,
+                                          "model": child_model})
+        _dbg.log("AGENT", f"spawn subagent  depth={self.depth + 1}  role={role}  "
+                           f"model={child_model}  task={task[:100]}")
         res = child.run(seed)
         files = list(dict.fromkeys(t for t in touched if t))
         # El padre toma nota de lo que tocó el hijo, para auto-verificar una vez al cerrar

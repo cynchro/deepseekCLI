@@ -276,6 +276,10 @@ _STRINGS = {
         "es": "    {model}: {calls} llamadas · {tokens} tok · {cache} cacheados · ${cost:.4f}",
         "en": "    {model}: {calls} calls · {tokens} tok · {cache} cached · ${cost:.4f}",
     },
+    "agent.cost.split": {
+        "es": "  Split PRO/FLASH: {pro_pct}% / {flash_pct}%  (por costo)",
+        "en": "  PRO/FLASH split: {pro_pct}% / {flash_pct}%  (by cost)",
+    },
     "agent.rules.none": {
         "es": "  Sin DEEP.md ni .deeprules. Creá uno con /init.",
         "en": "  No DEEP.md or .deeprules. Create one with /init.",

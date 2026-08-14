@@ -304,13 +304,13 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | `explore` | Investigación **read-only delegada a FLASH**: le hacés una pregunta sobre el código y un agente lector devuelve un resumen compacto, sin gastar el contexto caro del orquestador. |
 | `generate_code` / `apply_edit` | Generación/edición **delegada a FLASH** — excepción, para volumen mecánico de bajo riesgo (boilerplate, scaffolding). `apply_edit` usa bloques SEARCH/REPLACE quirúrgicos. |
 | `write_tasks` / `update_task` | Lista de tareas persistente (`.deep/tasks.json`) para trabajos largos. |
-| `spawn_agent` | Delega una parte grande y autocontenida a un sub-agente con contexto fresco. |
+| `spawn_agent` | Delega una parte grande y autocontenida a un sub-agente con contexto fresco. `role` (default `build` → FLASH) resuelve el modelo del hijo; pedile un role PRO (`review`/`decide`/...) solo si esa parte necesita juicio propio. |
 | `browser_navigate` / `browser_click` / `browser_type` / `browser_eval` / ... | Control de un navegador real para debugging/scraping de frontend — con la extensión de Chrome instalada (ver "Navegador" más abajo), es TU Chrome, con tu sesión logueada. |
 | `exit_plan_mode` | **Solo en modo `plan`.** Presenta el plan propuesto y pide aprobación explícita antes de pasar a ejecución (ver "Permisos / modos" más abajo). |
 
 ### Lo que lo acerca a Claude Code
 
-- **El modelo fuerte escribe el código**, no un modelo más débil. La calidad no se sacrifica para ahorrar tokens.
+- **PRO decide y escribe el código que importa** directo, sin traducir a specs. Delega ejecución mecánica bien especificada a FLASH (`generate_code`/`apply_edit`, o `spawn_agent` con role de bajo riesgo) — nunca la parte que requiere criterio. La calidad no se sacrifica para ahorrar tokens.
 - **Edición quirúrgica**: `edit_file` cambia solo las líneas que tocan; nunca reescribe archivos enteros para un cambio puntual.
 - **Diffs visibles**: cada edición muestra el diff real (coloreado) y se lo devuelve al modelo para que **auto-revise** lo que escribió.
 - **Verificación automática**: al cerrar un turno que tocó código, `deep` corre los tests del proyecto (pytest / `npm test` detectados) y, si están en rojo, reinyecta el fallo al loop hasta dejarlo en verde. Respeta los permisos (en modo `plan` o remoto no corre).
@@ -329,7 +329,7 @@ decide qué herramienta llamar, observa el resultado e itera hasta resolver la t
 | `/tasks` | Muestra el plan de tareas persistente. |
 | `/rules` | Muestra el `DEEP.md` y `.deeprules` cargados. |
 | `/skills` · `/skill <n> <tarea>` | Lista skills / corre una tarea aplicando un skill. |
-| `/cost` | Tokens y costo estimado por modelo de la sesión (con cache hits). |
+| `/cost` | Tokens y costo estimado por modelo de la sesión (con cache hits y split PRO/FLASH). |
 | `/clear` · `/new` | Reinicia la conversación del agente. |
 | `/sessions` | Lista las sesiones activas en el daemon (`deep serve`) — incluida esta terminal y cualquier PWA atacheada. |
 | `/attach <id>` | Te conecta a una sesión existente del daemon (ver `/sessions`) en vez de crear una nueva. |
@@ -375,11 +375,18 @@ de agente vista desde 3 clientes distintos.
 
 | Rol | Modelo | Para qué |
 |-----|--------|----------|
-| Orquestar, **escribir código**, revisar, verificar | **`deepseek-v4-pro`** | El cerebro y las manos. Decide y escribe lo que importa. |
-| Leer/resumir (`explore`, compactación) y volumen mecánico (`generate_code`/`apply_edit`) | **`deepseek-v4-flash`** | ~3× más barato. Trabajo de bajo riesgo y alto volumen. |
+| Orquestar, **escribir código** que importa, revisar, verificar | **`deepseek-v4-pro`** | El cerebro y las manos. Decide y escribe lo que importa. |
+| Leer/resumir (`explore`, compactación), volumen mecánico (`generate_code`/`apply_edit`), sub-agentes delegados de bajo riesgo (`spawn_agent`, role default `build`) | **`deepseek-v4-flash`** | ~3× más barato. Trabajo de bajo riesgo y alto volumen. |
 
 Cambiás el orquestador con `/model pro|flash`. La telemetría (`/cost`) desglosa tokens y
-costo por modelo, contemplando el **prompt caching** (los prefijos cacheados se cobran ~100× menos).
+costo por modelo (con split PRO/FLASH), contemplando el **prompt caching** (los prefijos
+cacheados se cobran ~100× menos).
+
+`spawn_agent` resuelve el modelo del sub-agente por `role` en vez de heredar el del padre —
+se agregó para que delegar una tarea grande no dispare el costo simplemente porque el
+orquestador está en PRO. Default `role="build"` → FLASH; PRO puede pedir explícitamente
+`orchestrate`/`plan`/`review`/`decide`/`reflect` cuando la parte delegada necesita juicio
+propio.
 
 > **Migración:** los IDs viejos `deepseek-chat` y `deepseek-reasoner` están **deprecados
 > (sunset 2026-07-24)**. `deep` los acepta por compatibilidad y los mapea a los modelos v4
@@ -451,8 +458,11 @@ Hay ejemplos en [`examples/skills/`](examples/skills/) (reviewer, security, docs
 - **Subagentes** (`spawn_agent`): el agente delega una parte grande y autocontenida (un módulo,
   un subsistema) a un sub-agente con contexto fresco, que devuelve un resumen compacto — el
   orquestador se mantiene liviano. Con guardas de profundidad y aislamiento del plan global.
+  El modelo del sub-agente se elige por `role` (default `"build"` → FLASH, ~3× más barato);
+  se puede pedir un role PRO explícito si esa parte puntual necesita diseño o juicio propio.
   Si emite **varios `spawn_agent` en el mismo turno** (partes independientes entre sí), corren
-  **en paralelo** (threads); el padre verifica una sola vez al final con lo que tocaron todos.
+  **en paralelo** (threads), cada uno con el role que le corresponda; el padre verifica una
+  sola vez al final con lo que tocaron todos.
 - **Compactación automática**: cuando el historial crece, los turnos viejos se resumen con FLASH
   preservando objetivo, archivos tocados, decisiones y pendientes.
 

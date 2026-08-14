@@ -8,6 +8,32 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 ## [Unreleased]
 
 ### Added
+- **Routing de costo PRO/FLASH para `spawn_agent`** — motivado por la suba de precio de
+  DeepSeek: la idea es preservar `deep` como CLI usable sin que el costo por sesión se
+  dispare, sin sacrificar razonamiento ni confiabilidad. Hasta ahora
+  `AgentLoop._spawn_subagent()` heredaba `model=self.model` del padre — un padre en PRO
+  generaba sub-agentes íntegramente en PRO, sin ningún ahorro, aunque `spawn_agent` es el
+  mecanismo pensado para delegar el mayor volumen de trabajo ("una parte grande y
+  autocontenida"). Se conecta `ROLE_MODELS` (tabla ya existente en `core/models.py`, sin
+  usar hasta ahora) vía una nueva función `core/router.py::model_for(role)`. La tool
+  `spawn_agent(task, context_files=None, role="build")` ahora resuelve el modelo del hijo
+  por ROL en vez de heredarlo: default `"build"` → FLASH (~3× más barato), y quien orquesta
+  puede pedir explícitamente un role PRO (`orchestrate`/`plan`/`review`/`decide`/`reflect`)
+  cuando la parte delegada realmente necesita diseño, ambigüedad a resolver o juicio propio.
+  `DEFAULT_SYSTEM` actualizado con la nueva filosofía: PRO decide QUÉ código debe existir y
+  escribe directo cuando hay razonamiento/diseño/algoritmos/detalles sutiles; delega la
+  ejecución (`generate_code`/`apply_edit` para un archivo, `spawn_agent(role=...)` para una
+  tarea autocontenida) cuando ya está suficientemente especificada y es mecánica/de bajo
+  riesgo — reemplaza la filosofía anterior ("VOS escribís el código, no delegues la parte
+  que importa") que forzaba todo por PRO. `/cost` ahora también muestra el split de costo
+  PRO vs FLASH de la sesión. Protecciones existentes intactas y sin tocar: `_explore` sigue
+  fijo en FLASH read-only, `_auto_verify` sigue siendo responsabilidad exclusiva del padre,
+  plan mode sigue bloqueando `spawn_agent` a nivel de schema, `max_depth`/paralelismo
+  (`ThreadPoolExecutor`/`_confirm_lock`)/permisos sin cambios — el `role` solo alimenta la
+  resolución de modelo, nunca la profundidad ni las exclusiones de tools. Tests nuevos
+  (`tests/test_spawn_roles.py`) verifican de punta a punta que un padre PRO delega en FLASH
+  por default y que un padre FLASH puede pedir PRO explícitamente por rol — regresión directa
+  del bug que motivó el cambio.
 - **Extensión de Chrome como backend real del navegador** (`chrome_bridge/`): hasta ahora
   `browser_navigate`/`browser_click`/etc. solo podían controlar un Chromium aislado (vía
   Playwright) o un Chrome real conectado por el puerto CDP (`--remote-debugging-port`) — pero

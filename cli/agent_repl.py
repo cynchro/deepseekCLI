@@ -474,9 +474,17 @@ class _Repl:
         print(t("agent.cost.summary", calls=st["successful_calls"],
                 tokens=st["total_tokens_used"], cache=cache,
                 cost=st["estimated_cost_usd"]))
-        for m, v in st.get("by_model", {}).items():
+        by_model = st.get("by_model", {})
+        for m, v in by_model.items():
             print(t("agent.cost.model", model=m, calls=v["calls"], tokens=v["tokens"],
                     cache=v.get("cache_hit_tokens", 0), cost=v["cost_usd"]))
+        from core.models import MODEL_PRO, MODEL_FLASH
+        pro_cost = by_model.get(MODEL_PRO, {}).get("cost_usd", 0.0)
+        flash_cost = by_model.get(MODEL_FLASH, {}).get("cost_usd", 0.0)
+        total = pro_cost + flash_cost
+        if total > 0:
+            print(t("agent.cost.split", pro_pct=round(pro_cost / total * 100),
+                    flash_pct=round(flash_cost / total * 100)))
 
     def _rules(self):
         rules = load_rules(self.cwd / ".deeprules")
